@@ -1,0 +1,359 @@
+BASE <http://nesped1.caf.ufv.br/micelio/ontology>
+PREFIX mcl: <#>
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX time: <http://www.w3.org/2006/time#>
+PREFIX tz: <http://www.w3.org/2006/timezone#>
+PREFIX qu: <http://purl.oclc.org/NET/ssnx/qu/qu#>
+PREFIX dim: <http://purl.oclc.org/NET/ssnx/qu/dim#>
+PREFIX unit: <http://purl.oclc.org/NET/ssnx/qu/unit#>
+PREFIX quantity: <http://purl.oclc.org/NET/ssnx/qu/quantity#>
+PREFIX prefix: <http://purl.oclc.org/NET/ssnx/qu/prefix#>
+
+<ontology/unit> a owl:Ontology;
+  rdfs:comment "Goal: extend unit/measure definitions.".
+
+# region Information
+dim:Information a owl:Class;
+  rdfs:subClassOf qu:QuantityKind, [
+    a owl:Restriction;
+    owl:onProperty qu:unitKind;
+    owl:allValuesFrom dim:InformationUnit;
+  ].
+
+quantity:information a owl:NamedIndividual, dim:Information;
+  qu:propertyType quantity:property ;
+  rdfs:comment "A measure of digital data size.";
+  rdfs:label "information".
+
+dim:InformationUnit a owl:Class;
+  rdfs:subClassOf qu:Unit.
+
+dim:DataRate a owl:Class;
+  rdfs:subClassOf qu:QuantityKind, [
+    a owl:Restriction;
+    owl:onProperty qu:unitKind;
+    owl:allValuesFrom dim:DataRateUnit;
+  ].
+
+quantity:dataRate a owl:NamedIndividual, dim:DataRate;
+  qu:propertyType quantity:property ;
+  rdfs:comment "A measure of digital data conveyed or processed per unit of time.";
+  rdfs:label "data rate".
+
+dim:DataRateUnit a owl:Class;
+  rdfs:subClassOf qu:Unit.
+
+unit:bit a owl:NamedIndividual, dim:InformationUnit;
+  qu:quantityKind quantity:information;
+  qu:symbol "bit";
+  rdfs:label "bit".
+
+unit:bps a owl:NamedIndividual, dim:DataRateUnit;
+  qu:quantityKind quantity:dataRate;
+  qu:symbol "bps";
+  rdfs:label "bit per second".
+
+unit:byte a owl:NamedIndividual, dim:InformationUnit;
+  qu:referenceUnit unit:bit;
+  qu:conversionFactor 8;
+  qu:symbol "B";
+  rdfs:label "byte".
+
+unit:kilobit a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:kilo;
+  qu:referenceUnit unit:bit;
+  qu:conversionFactor 1e3;
+  qu:symbol "kbit";
+  rdfs:label "kilobit".
+
+unit:kbps a owl:NamedIndividual, dim:DataRateUnit;
+  qu:prefix prefix:kilo;
+  qu:referenceUnit unit:bps;
+  qu:conversionFactor 1e3;
+  qu:symbol "Kbps";
+  rdfs:label "kilobit per second".
+
+unit:megabit a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:mega;
+  qu:referenceUnit unit:bit;
+  qu:conversionFactor 1e6;
+  qu:symbol "Mbit";
+  rdfs:label "megabit".
+
+unit:mbps a owl:NamedIndividual, dim:DataRateUnit;
+  qu:prefix prefix:mega;
+  qu:referenceUnit unit:bps;
+  qu:conversionFactor 1e6;
+  qu:symbol "Mbps";
+  rdfs:label "megabit per second".
+
+unit:gigabit a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:giga;
+  qu:referenceUnit unit:bit;
+  qu:conversionFactor 1e9;
+  qu:symbol "Gbit";
+  rdfs:label "gigabit".
+
+unit:gbps a owl:NamedIndividual, dim:DataRateUnit;
+  qu:prefix prefix:giga;
+  qu:referenceUnit unit:bps;
+  qu:conversionFactor 1e9;
+  qu:symbol "Gbps";
+  rdfs:label "gigabit per second".
+
+unit:terabit a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:tera;
+  qu:referenceUnit unit:bit;
+  qu:conversionFactor 1e12;
+  qu:symbol "Tbit";
+  rdfs:label "terabit".
+
+unit:petabit a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:peta;
+  qu:referenceUnit unit:bit;
+  qu:conversionFactor 1e15;
+  qu:symbol "Pbit";
+  rdfs:label "petabit".
+
+unit:exabit a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:exa;
+  qu:referenceUnit unit:bit;
+  qu:conversionFactor 1e18;
+  qu:symbol "Ebit";
+  rdfs:label "exabit".
+
+unit:zettabit a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:zetta;
+  qu:referenceUnit unit:bit;
+  qu:conversionFactor 1e21;
+  qu:symbol "Zbit";
+  rdfs:label "zettabit".
+
+unit:yottabit a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:yotta;
+  qu:referenceUnit unit:bit;
+  qu:conversionFactor 1e24;
+  qu:symbol "Ybit";
+  rdfs:label "yottabit".
+
+unit:kibibit a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:kibi;
+  qu:referenceUnit unit:bit;
+  qu:conversionFactor 1024;
+  qu:symbol "Kibit";
+  rdfs:label "kibibit".
+
+unit:mebibit a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:mebi;
+  qu:referenceUnit unit:kibibit;
+  qu:conversionFactor 1024;
+  qu:symbol "Mibit";
+  rdfs:label "mebibit".
+
+unit:gibibit a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:gibi;
+  qu:referenceUnit unit:mebibit;
+  qu:conversionFactor 1024;
+  qu:symbol "Gibit";
+  rdfs:label "gibibit".
+
+unit:tebibit a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:tebi;
+  qu:referenceUnit unit:gibibit;
+  qu:conversionFactor 1024;
+  qu:symbol "Tibit";
+  rdfs:label "tebibit".
+
+unit:pebibit a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:pebi;
+  qu:referenceUnit unit:tebibit;
+  qu:conversionFactor 1024;
+  qu:symbol "Pibit";
+  rdfs:label "pebibit".
+
+unit:exbibit a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:exbi;
+  qu:referenceUnit unit:pebibit;
+  qu:conversionFactor 1024;
+  qu:symbol "Eibit";
+  rdfs:label "exbibit".
+
+unit:zebibit a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:zebi;
+  qu:referenceUnit unit:exbibit;
+  qu:conversionFactor 1024;
+  qu:symbol "Zibit";
+  rdfs:label "zebibit".
+
+unit:yobibit a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:yobi;
+  qu:referenceUnit unit:zebibit;
+  qu:conversionFactor 1024;
+  qu:symbol "Yibit";
+  rdfs:label "yobibit".
+
+unit:kilobyte a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:kilo;
+  qu:referenceUnit unit:byte;
+  qu:conversionFactor 1e3;
+  qu:symbol "kB";
+  rdfs:label "kilobyte".
+
+unit:megabyte a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:mega;
+  qu:referenceUnit unit:byte;
+  qu:conversionFactor 1e6;
+  qu:symbol "MB";
+  rdfs:label "megabyte".
+
+unit:gigabyte a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:giga;
+  qu:referenceUnit unit:byte;
+  qu:conversionFactor 1e9;
+  qu:symbol "GB";
+  rdfs:label "gigabyte".
+
+unit:terabyte a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:tera;
+  qu:referenceUnit unit:byte;
+  qu:conversionFactor 1e12;
+  qu:symbol "TB";
+  rdfs:label "terabyte".
+
+unit:petabyte a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:peta;
+  qu:referenceUnit unit:byte;
+  qu:conversionFactor 1e15;
+  qu:symbol "PB";
+  rdfs:label "petabyte".
+
+unit:exabyte a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:exa;
+  qu:referenceUnit unit:byte;
+  qu:conversionFactor 1e18;
+  qu:symbol "EB";
+  rdfs:label "exabyte".
+
+unit:zettabyte a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:zetta;
+  qu:referenceUnit unit:byte;
+  qu:conversionFactor 1e21;
+  qu:symbol "ZB";
+  rdfs:label "zettabyte".
+
+unit:yottabyte a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:yotta;
+  qu:referenceUnit unit:byte;
+  qu:conversionFactor 1e24;
+  qu:symbol "YB";
+  rdfs:label "yottabyte".
+
+unit:kibibyte a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:kibi;
+  qu:referenceUnit unit:byte;
+  qu:conversionFactor 1024;
+  qu:symbol "KiB";
+  rdfs:label "kibibyte".
+
+unit:mebibyte a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:mebi;
+  qu:referenceUnit unit:kibibyte;
+  qu:conversionFactor 1024;
+  qu:symbol "MiB";
+  rdfs:label "mebibyte".
+
+unit:gibibyte a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:gibi;
+  qu:referenceUnit unit:mebibyte;
+  qu:conversionFactor 1024;
+  qu:symbol "GiB";
+  rdfs:label "gibibyte".
+
+unit:tebibyte a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:tebi;
+  qu:referenceUnit unit:gibibyte;
+  qu:conversionFactor 1024;
+  qu:symbol "TiB";
+  rdfs:label "tebibyte".
+
+unit:pebibyte a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:pebi;
+  qu:referenceUnit unit:tebibyte;
+  qu:conversionFactor 1024;
+  qu:symbol "PiB";
+  rdfs:label "pebibyte".
+
+unit:exbibyte a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:exbi;
+  qu:referenceUnit unit:pebibyte;
+  qu:conversionFactor 1024;
+  qu:symbol "EiB";
+  rdfs:label "exbibyte".
+
+unit:zebibyte a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:zebi;
+  qu:referenceUnit unit:exbibyte;
+  qu:conversionFactor 1024;
+  qu:symbol "ZiB";
+  rdfs:label "zebibyte".
+
+unit:yobibyte a owl:NamedIndividual, dim:InformationUnit;
+  qu:prefix prefix:yobi;
+  qu:referenceUnit unit:zebibyte;
+  qu:conversionFactor 1024;
+  qu:symbol "YiB";
+  rdfs:label "yobibyte".
+
+prefix:kibi a owl:NamedIndividual, qu:Prefix;
+  qu:name "kibi";
+  qu:symbol "Ki";
+  qu:unitMultipleFactor "1024"^^xsd:integer;
+  rdfs:label "kibi".
+
+prefix:mebi a owl:NamedIndividual, qu:Prefix;
+  qu:name "mebi";
+  qu:symbol "Mi";
+  qu:unitMultipleFactor "1048576"^^xsd:integer;
+  rdfs:label "mebi".
+
+prefix:gibi a owl:NamedIndividual, qu:Prefix;
+  qu:name "gibi";
+  qu:symbol "Gi";
+  qu:unitMultipleFactor "1073741824"^^xsd:integer;
+  rdfs:label "gibi".
+
+prefix:tebi a owl:NamedIndividual, qu:Prefix;
+  qu:name "tebi";
+  qu:symbol "Ti";
+  qu:unitMultipleFactor "1099511627776"^^xsd:integer;
+  rdfs:label "tebi".
+
+prefix:pebi a owl:NamedIndividual, qu:Prefix;
+  qu:name "pebi";
+  qu:symbol "Pi";
+  qu:unitMultipleFactor "1125899906842624"^^xsd:integer;
+  rdfs:label "pebi".
+
+prefix:exbi a owl:NamedIndividual, qu:Prefix;
+  qu:name "exbi";
+  qu:symbol "Ei";
+  qu:unitMultipleFactor "1152921504606846976"^^xsd:integer;
+  rdfs:label "exbi".
+
+prefix:zebi a owl:NamedIndividual, qu:Prefix;
+  qu:name "zebi";
+  qu:symbol "Zi";
+  qu:unitMultipleFactor "1180591620717411303424"^^xsd:integer;
+  rdfs:label "zebi".
+
+prefix:yobi a owl:NamedIndividual, qu:Prefix;
+  qu:name "yobi";
+  qu:symbol "Yi";
+  qu:unitMultipleFactor "1208925819614629174706176"^^xsd:integer;
+  rdfs:label "yobi".
+
+# endregion Information
+

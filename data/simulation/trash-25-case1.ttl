@@ -1,0 +1,62 @@
+PREFIX : <http://nesped1.caf.ufv.br/micelio/simulation/trash#>
+PREFIX sim: <http://nesped1.caf.ufv.br/micelio/simulation#>
+PREFIX mcl: <http://nesped1.caf.ufv.br/micelio/ontology#>
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX qu: <http://purl.oclc.org/NET/ssnx/qu/qu#>
+PREFIX unit: <http://purl.oclc.org/NET/ssnx/qu/unit#>
+PREFIX tlc: <http://gessi.lsi.upc.edu/threelevelcontextmodelling/ThreeLContextOnt/UpperLevelOntology#>
+
+sim:Case2 a sim:TestCase ;
+    sim:usesIPv6 false;
+    sim:prefix <http://nesped1.caf.ufv.br/micelio/simulation/trash#>;
+    sim:cloudLayer [
+        sim:initWith "data/simulation/trash-model.ttl";
+        sim:port 4242;
+        sim:linkToFog [
+            sim:dataRate [ rdf:value 1; qu:unit unit:gbps ];
+            sim:delay [ rdf:value 10; qu:unit unit:millisecond ];
+        ];
+        sim:linkToEdge [
+            sim:dataRate [ rdf:value 100; qu:unit unit:mbps ];
+            sim:delay [ rdf:value 100; qu:unit unit:millisecond ];
+        ];
+    ];
+    sim:fogLayer [
+        sim:nodes 4;
+        sim:port 4242;
+        sim:link [
+            sim:dataRate [ rdf:value 100; qu:unit unit:mbps ];
+            sim:delay [ rdf:value 35; qu:unit unit:microsecond ];
+        ];
+        sim:linkToEdge [
+            sim:dataRate [ rdf:value 100; qu:unit unit:mbps ];
+            sim:delay [ rdf:value 2.5; qu:unit unit:microsecond ];
+        ];
+    ];
+    sim:edgeLayer [
+        sim:useCsma false;
+        sim:nodes 25;
+        sim:userNodes 1;
+        sim:initWith "data/archive/trash-data-25.ttl";
+        sim:acquiring mcl:CategorizedImage, mcl:EntityImage;
+        sim:link [
+            sim:dlBandwidth [ rdf:value 10 ; qu:unit unit:megahertz ] ;
+            sim:ulBandwidth [ rdf:value 10 ; qu:unit unit:megahertz ] ;
+        ];
+    ];
+    sim:environment [
+        sim:nodesPerENodeB 10;
+        sim:radius [ rdf:value 2.5 ; qu:unit unit:kilometre ];
+    ];
+    sim:learning [
+        sim:testFrac 0.2;
+        sim:validationFrac 0.2;
+        sim:seed 42;
+        sim:task :TrashCategorization;
+        sim:flAlgorithm mcl:DefaultFedAvg;
+        sim:mlAlgorithm mcl:ResNet18ImageClassifier;
+    ];
+    .

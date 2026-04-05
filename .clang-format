@@ -1,0 +1,7 @@
+IndentWidth: 4
+AccessModifierOffset: -4
+AlignAfterOpenBracket: BlockIndent
+AlignConsecutiveAssignments: Consecutive
+BinPackArguments: false
+BinPackParameters: false
+ColumnLimit: 100

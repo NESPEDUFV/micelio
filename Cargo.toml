@@ -1,0 +1,3 @@
+[workspace]
+resolver = "3"
+members  = ["micelio", "micelio-derive", "micelio-ns3", "micelio-rdf", "nsrs"]

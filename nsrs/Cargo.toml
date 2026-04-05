@@ -1,0 +1,20 @@
+[package]
+name    = "nsrs"
+version = "0.1.0"
+edition = "2024"
+links   = "nsrs"
+
+[dependencies]
+chrono            = "0.4.44"
+crossbeam-channel = "0.5.15"
+cxx               = "1.0.187"
+futures           = "0.3.31"
+pin-project       = "1.1.10"
+
+[build-dependencies]
+cxx-build = "1.0.187"
+
+[lib]
+name       = "nsrs"
+path       = "src/lib.rs"
+crate-type = ["staticlib", "rlib"]

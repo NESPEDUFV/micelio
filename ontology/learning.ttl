@@ -1,0 +1,213 @@
+BASE <http://nesped1.caf.ufv.br/micelio/ontology>
+PREFIX mcl: <http://nesped1.caf.ufv.br/micelio/ontology#>
+PREFIX task: <http://nesped1.caf.ufv.br/micelio/tasks#>
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX qu: <http://purl.oclc.org/NET/ssnx/qu/qu#>
+PREFIX unit: <http://purl.oclc.org/NET/ssnx/qu/unit#>
+PREFIX tlc: <http://gessi.lsi.upc.edu/threelevelcontextmodelling/ThreeLContextOnt/UpperLevelOntology#>
+
+<ontology/learning> a owl:Ontology;
+  rdfs:comment "Goal: describe federated learning related information.";
+  owl:imports <ontology/model>, <ontology/unit>.
+
+
+mcl:LearningRole a owl:Class;
+  rdfs:subClassOf tlc:Role;
+  rdfs:comment "A role a CCNode can take during a learning task.".
+
+mcl:LearningCoordinator a owl:Class;
+  rdfs:subClassOf mcl:LearningRole.
+
+mcl:LearningAggregator a owl:Class;
+  rdfs:subClassOf mcl:LearningRole.
+
+mcl:LearningLocalAggregator a owl:Class;
+  rdfs:subClassOf mcl:LearningAggregator.
+
+mcl:LearningGlobalAggregator a owl:Class;
+  rdfs:subClassOf mcl:LearningAggregator.
+
+mcl:LearningClient a owl:Class;
+  rdfs:subClassOf mcl:LearningRole;
+  .
+
+mcl:LearningTaskLayout a owl:Class;
+  rdfs:comment "A description of how a machine learning task should be performed by the middleware.";
+  rdfs:subClassOf tlc:Activity,
+    [
+      a owl:Restriction;
+      owl:onProperty mcl:hasFeature;
+      owl:someValuesFrom rdf:Class;
+    ],
+    [
+      a owl:Restriction;
+      owl:onProperty mcl:hasTarget;
+      owl:someValuesFrom owl:Class;
+    ];
+  .
+
+mcl:LearningParadigm a owl:Class;
+  rdfs:comment "A machine learning paradigm, which defines classes of machine learning algorithms.";
+  rdfs:subClassOf tlc:Profile;
+  .
+
+mcl:SupervisedLearning a mcl:LearningParadigm.
+mcl:UnsupervisedLearning a mcl:LearningParadigm.
+
+mcl:inParadigm a owl:ObjectProperty, owl:FunctionalProperty;
+  rdfs:comment "Defines to what paradigm a particular machine learning algorithm belongs to.";
+  rdfs:domain mcl:MlAlgorithm;
+  rdfs:range mcl:LearningParadigm;
+  .
+
+mcl:requiresParadigm a owl:ObjectProperty, owl:FunctionalProperty;
+  rdfs:comment "Defines what paradigm is required by a task. If absent, this information is inferred.";
+  rdfs:domain mcl:LearningTaskLayout;
+  rdfs:range mcl:LearningParadigm;
+  .
+
+mcl:hasTarget a owl:ObjectProperty, owl:FunctionalProperty;
+  rdfs:domain mcl:LearningTaskLayout;
+  rdfs:range rdf:Property;
+  .
+
+mcl:hasFeature a owl:ObjectProperty;
+  rdfs:domain mcl:LearningTaskLayout;
+  rdfs:range owl:Class;
+  .
+
+mcl:FlAlgorithm a owl:Class;
+  rdfs:subClassOf tlc:Resource;
+  .
+
+mcl:DefaultFedAvg a mcl:FlAlgorithm;
+  .
+
+mcl:MlAlgorithm a owl:Class;
+  rdfs:subClassOf tlc:Resource;
+  .
+
+mcl:ResNet18ImageClassifier a mcl:MlAlgorithm;
+  mcl:acquires mcl:DatasetSize, mcl:Accuracy;
+  mcl:inParadigm mcl:SupervisedLearning;
+  .
+
+mcl:EntityImage a owl:Class;
+  rdfs:comment "An image of an entity.";
+  rdfs:subClassOf
+    tlc:Profile,
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty mcl:represents;
+      mcl:onRange tlc:Entity;
+      mcl:isKey true;
+    ],
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty mcl:filePath;
+      mcl:onRange xsd:string;
+    ];
+  .
+
+mcl:CategorizedImage a owl:Class;
+  mcl:visibility mcl:Public;
+  rdfs:subClassOf
+    tlc:Profile,
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty mcl:represents;
+      mcl:onRange tlc:Entity;
+      mcl:isKey true;
+    ],
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty mcl:category;
+      mcl:onRange tlc:Context;
+    ];
+  .
+
+mcl:represents a owl:ObjectProperty;
+  rdfs:comment "Indicates what entity is represented in an image.";
+  rdfs:subPropertyOf tlc:characterizes;
+  rdfs:domain mcl:EntityImage;
+  rdfs:range tlc:Entity;
+  .
+
+mcl:representedBy a owl:ObjectProperty;
+  owl:inverseOf mcl:represents;
+  rdfs:domain tlc:Entity;
+  rdfs:range mcl:EntityImage;
+  .
+
+mcl:hasCategory a owl:ObjectProperty;
+  rdfs:domain tlc:Entity;
+  rdfs:range tlc:Context;
+  owl:propertyChainAxiom ( mcl:representedBy mcl:category )
+  .
+
+mcl:filePath a owl:DatatypeProperty, owl:FunctionalProperty;
+  rdfs:comment "Indicates a file path that locates a resource";
+  rdfs:range xsd:string;
+  .
+
+mcl:category a owl:ObjectProperty, owl:FunctionalProperty;
+  rdfs:comment "Indicates";
+  rdfs:domain tlc:Context;
+  rdfs:range tlc:Context;
+  .
+
+mcl:Aggregation a owl:Class;
+  rdfs:subClassOf
+  tlc:Event,
+  [ a mcl:WithAttribute;
+    mcl:onProperty mcl:forTask ],
+  [ a mcl:WithAttribute;
+    mcl:onProperty mcl:forRound ],
+  [ a mcl:WithAttribute;
+    mcl:onProperty mcl:onNode ];
+  .
+
+mcl:DatasetSize a owl:Class;
+  rdfs:subClassOf
+    tlc:Profile,
+    [ a mcl:WithAttribute;
+      mcl:onProperty rdf:value;
+      mcl:onRange xsd:nonNegativeInteger;
+    ],
+    [ a mcl:WithAttribute;
+      mcl:onProperty mcl:forTask;
+    ];
+  mcl:visibility mcl:Public;
+  .
+
+mcl:Accuracy a owl:Class;
+  rdfs:subClassOf
+    tlc:Profile,
+    [ a mcl:WithAttribute;
+      mcl:onProperty rdf:value;
+      mcl:onRange xsd:double;
+    ],
+    [ a mcl:WithAttribute;
+      mcl:onProperty mcl:forTask;
+    ],
+    [ a mcl:WithAttribute;
+      mcl:onProperty mcl:forRound;
+    ];
+  mcl:visibility mcl:Public;
+  .
+
+mcl:forTask a owl:ObjectProperty, owl:FunctionalProperty;
+  rdfs:range mcl:LearningTask;
+  .
+
+mcl:forRound a owl:ObjectProperty, owl:FunctionalProperty;
+  rdfs:range xsd:nonNegativeInteger;
+  .
+
+mcl:onNode a owl:ObjectProperty;
+  rdfs:domain mcl:Aggregation;
+  rdfs:range mcl:CcNode;
+  .

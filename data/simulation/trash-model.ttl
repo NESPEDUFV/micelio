@@ -1,0 +1,42 @@
+BASE <http://nesped1.caf.ufv.br/micelio/simulation/trash>
+PREFIX trash: <http://nesped1.caf.ufv.br/micelio/simulation/trash#>
+PREFIX mcl: <http://nesped1.caf.ufv.br/micelio/ontology#>
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX qu: <http://purl.oclc.org/NET/ssnx/qu/qu#>
+PREFIX unit: <http://purl.oclc.org/NET/ssnx/qu/unit#>
+PREFIX tlc: <http://gessi.lsi.upc.edu/threelevelcontextmodelling/ThreeLContextOnt/UpperLevelOntology#>
+
+trash:TrashItem a owl:Class;
+    rdfs:subClassOf tlc:Entity;
+    .
+
+trash:TrashBin a owl:Class;
+    rdfs:subClassOf
+        tlc:Entity,
+        [
+            a owl:Restriction;
+            owl:onProperty trash:contains;
+            owl:someValuesFrom mcl:EdgeNode;
+        ];
+    .
+
+trash:contains a owl:ObjectProperty, owl:TransitiveProperty;
+    rdfs:domain tlc:Entity;
+    rdfs:range tlc:Entity;
+    .
+
+trash:TrashCategorization a mcl:LearningTaskLayout;
+    mcl:hasTarget mcl:CategorizedImage;
+    mcl:hasFeature mcl:EntityImage;
+    .
+
+trash:TrashCategory a owl:Class.
+trash:Paper a trash:TrashCategory.
+trash:Cardboard a trash:TrashCategory.
+trash:Plastic a trash:TrashCategory.
+trash:Glass a trash:TrashCategory.
+trash:Trash a trash:TrashCategory.
+trash:Metal a trash:TrashCategory.

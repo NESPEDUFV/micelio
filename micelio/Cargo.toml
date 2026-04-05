@@ -1,0 +1,43 @@
+[package]
+name    = "micelio"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async-trait    = "0.1.89"
+chrono         = "0.4.44"
+ciborium       = "0.2.2"
+coap-lite      = { version = "0.13.3", optional = true }
+futures        = "0.3.31"
+itertools      = "0.14.0"
+kdtree         = "0.8.0"
+logos          = "0.16.1"
+micelio-derive = { path = "../micelio-derive" }
+micelio-rdf    = { path = "../micelio-rdf", features = ["smallvec"] }
+nsrs           = { path = "../nsrs" }
+oxigraph       = { version = "0.5.3", default-features = false }
+oxiri          = { version = "0.2.11", features = ["serde"] }
+oxrdf          = "0.3.0"
+oxttl          = "0.2.0"
+rand           = "0.10.0"
+reqwest        = "0.12.23"
+serde          = { version = "1.0.228", features = ["derive"] }
+serde_json     = { version = "1.0.145", optional = true }
+smallvec       = { version = "1.15.1", features = ["serde", "union"] }
+sparesults     = "0.3.0"
+spargebra      = "0.4.0"
+sqlparser      = "0.59.0"
+thiserror      = "2.0.17"
+tch            = { version = "0.23.0", optional = true }
+uuid           = { version = "1.19.0", features = ["v4"] }
+
+[features]
+default    = []
+simulation = ["reqwest/native-tls-vendored", "reqwest/blocking", "coap", "cloud", "fog", "edge"]
+coap       = ["dep:coap-lite", "coap-lite/udp", "dep:serde_json"]
+cloud      = []
+fog        = []
+edge       = []
+
+[dev-dependencies]
+smol = "2.0.2"

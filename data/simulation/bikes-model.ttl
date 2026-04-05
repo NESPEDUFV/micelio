@@ -1,0 +1,163 @@
+BASE <http://nesped1.caf.ufv.br/micelio/simulation/bikes>
+PREFIX : <http://nesped1.caf.ufv.br/micelio/simulation/bikes#>
+PREFIX mcl: <http://nesped1.caf.ufv.br/micelio/ontology#>
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX qu: <http://purl.oclc.org/NET/ssnx/qu/qu#>
+PREFIX unit: <http://purl.oclc.org/NET/ssnx/qu/unit#>
+PREFIX tlc: <http://gessi.lsi.upc.edu/threelevelcontextmodelling/ThreeLContextOnt/UpperLevelOntology#>
+
+# bike sharing:
+#   target: count
+#   key: hour_slot, site_id
+#   features:
+#     - real_temperature
+#     - apparent_temperature
+#     - humidity
+#     - wind_speed
+#     - weather_code
+#     - is_holiday
+#     - is_weekend
+#     - season
+
+:BikeShareTask a mcl:LearningTaskLayout;
+  mcl:hasTarget :BikeShareDemand;
+  mcl:hasFeature :BikeShareEventsAggregate;
+  .
+
+:BikeShareEventsKey a owl:Class;
+  rdfs:subClassOf
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty :hourSlot;
+      mcl:onRange xsd:dateTimeStamp;
+      mcl:isKey true;
+      mcl:derived [
+        mcl:fromAttribute [ mcl:onDomain :BikeShareEvent; mcl:onProperty :hourSlot ];
+      ];
+    ],
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty mcl:locatedAt;
+      mcl:onRange :MonitoringLocation;
+      mcl:isKey true;
+      mcl:derived [
+        mcl:fromAttribute [ mcl:onDomain :BikeShareEvent; mcl:onProperty mcl:locatedAt ];
+      ];
+    ];
+  .
+
+:BikeShareDemand a owl:Class;
+  mcl:visibility mcl:Public;
+  rdfs:subClassOf
+    tlc:State,
+    :BikeShareEventsKey,
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty :demand;
+      mcl:onRange xsd:nonNegativeInteger;
+      mcl:derived [
+        mcl:fromAttribute [ mcl:onDomain :BikeShareEvent; mcl:onProperty mcl:acquiredAt ];
+        mcl:fromExpression "COUNT(?acquiredAt)";
+      ];
+    ];
+    .
+
+:BikeShareEventsAggregate a owl:Class;
+  mcl:visibility mcl:Private;
+  rdfs:subClassOf
+    tlc:State,
+    :BikeShareEventsKey,
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty :avgRealTemperature;
+      mcl:onRange xsd:double;
+      mcl:derived [
+        mcl:fromAttribute [ mcl:onDomain :RealTemperature; mcl:onProperty rdf:value; rdf:label "rt" ] ;
+        mcl:fromExpression "AVG(?rt)";
+      ] ;
+    ],
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty :avgApparentTemperature;
+      mcl:onRange xsd:double;
+      mcl:derived [
+        mcl:fromAttribute [ mcl:onDomain :ApparentTemperature; mcl:onProperty rdf:value; rdf:label "at" ] ;
+        mcl:fromExpression "AVG(?at)";
+      ] ;
+    ],
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty :avgWindSpeed;
+      mcl:onRange xsd:double;
+      mcl:derived [
+        mcl:fromAttribute [ mcl:onDomain :WindSpeed; mcl:onProperty rdf:value; rdf:label "ws" ] ;
+        mcl:fromExpression "AVG(?ws)";
+      ] ;
+    ];
+  .
+
+:hourSlot a owl:DatatypeProperty;
+  rdfs:range xsd:dateTimeStamp;
+  mcl:derived [
+    mcl:fromAttribute [ mcl:onProperty mcl:acquiredAt ];
+    mcl:fromExpression "TIMESLOT('HOUR', ?acquiredAt)";
+  ];
+  .
+
+:MonitoringLocation a owl:Class;
+  rdfs:subClassOf
+    tlc:Location,
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty rdfs:label;
+      mcl:onRange xsd:string;
+      mcl:isKey true ;
+    ];
+  .
+
+:BikeShareEvent a owl:Class;
+  rdfs:subClassOf tlc:Event, :LocatedAtMonitoringLocation;
+  .
+
+:Temperature a owl:Class;
+  rdfs:subClassOf
+    tlc:State,
+    :LocatedAtMonitoringLocation,
+    mcl:TimedContext,
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty rdf:value;
+      mcl:onRange xsd:double;
+      mcl:referenceUnit unit:degreeCelsius;
+    ];
+  .
+
+:RealTemperature a owl:Class;
+  rdfs:subClassOf :Temperature;
+  .
+
+:ApparentTemperature a owl:Class;
+  rdfs:subClassOf :Temperature;
+  .
+
+:WindSpeed a owl:Class;
+  rdfs:subClassOf
+    tlc:State,
+    :LocatedAtMonitoringLocation,
+    mcl:TimedContext,
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty rdf:value;
+      mcl:onRange xsd:double;
+      mcl:referenceUnit unit:metrePerSecond;
+    ];
+  .
+
+:LocatedAtMonitoringLocation a mcl:WithAttribute;
+  mcl:onProperty mcl:locatedAt;
+  mcl:onRange :MonitoringLocation;
+  mcl:isKey true;
+  .

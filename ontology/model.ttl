@@ -1,0 +1,141 @@
+BASE <http://nesped1.caf.ufv.br/micelio/ontology>
+PREFIX mcl: <#>
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX qu: <http://purl.oclc.org/NET/ssnx/qu/qu#>
+PREFIX unit: <http://purl.oclc.org/NET/ssnx/qu/unit#>
+PREFIX tlc: <http://gessi.lsi.upc.edu/threelevelcontextmodelling/ThreeLContextOnt/UpperLevelOntology#>
+
+<ontology/model> a owl:Ontology;
+  owl:imports <https://raw.githubusercontent.com/ocabgit/Three-LevelContextOntology/refs/heads/master/UpperLevelOntology.owl>;
+  rdfs:comment "Goal: provide middle level ontology, based on 3LConOnt, for the middleware to operate.";
+  rdfs:seeAlso <https://github.com/ocabgit/Three-LevelContextOntology.git>.
+
+tlc:Context a owl:Class;
+  owl:equivalentClass tlc:ContextInformation.
+
+tlc:State a owl:Class;
+  rdfs:subClassOf tlc:Context;
+  owl:equivalentClass tlc:States\&Status.
+
+tlc:Event a owl:Class;
+  rdfs:subClassOf tlc:Activity, mcl:TimedContext;
+  .
+
+tlc:Location rdfs:subClassOf tlc:Context.
+
+mcl:acquires a owl:ObjectProperty;
+  rdfs:comment "Indicates what context classes an entity is able to acquire.";
+  rdfs:domain tlc:Entity;
+  rdfs:range owl:Class;
+  .
+
+mcl:Visibility a owl:Class;
+  rdfs:comment "Indicates if a context class is private (only accessible by the node that acquires it) or public (uploaded to the cloud).";
+  .
+
+mcl:Public a mcl:Visibility.
+mcl:Private a mcl:Visibility.
+
+mcl:visibility a owl:ObjectProperty;
+  rdfs:comment "Indicates if a context class is private (only accessible by the node that acquires it) or public (uploaded to the cloud).";
+  rdfs:domain owl:Class;
+  rdfs:range mcl:Visibility;
+  .
+
+mcl:TimedContext a owl:Class ;
+  rdfs:subClassOf tlc:Context ,
+    [ a mcl:WithAttribute ;
+      mcl:onProperty mcl:acquiredAt ;
+      mcl:onRange xsd:dateTimeStamp ;
+      mcl:isKey true ;
+    ] .
+
+mcl:LocatedContext a owl:Class ;
+  rdfs:subClassOf tlc:Context ,
+    [ a mcl:WithAttribute ;
+      mcl:onProperty mcl:locatedAt ;
+      mcl:onRange tlc:Location ;
+      mcl:isKey true ;
+    ] .
+
+mcl:acquiredAt a owl:DatatypeProperty, owl:FunctionalProperty;
+  rdfs:comment "Indicates when a context information has been acquired.";
+  rdfs:domain tlc:Context;
+  rdfs:range xsd:dateTimeStamp.
+
+mcl:acquiredBy a owl:ObjectProperty, owl:FunctionalProperty;
+  rdfs:comment "Indicates what entity acquired the context information.";
+  rdfs:domain tlc:Context;
+  rdfs:range tlc:Entity;
+  .
+
+mcl:acquired a owl:ObjectProperty;
+  rdfs:comment "Indicates contexts acquired by an entity.";
+  rdfs:domain tlc:Entity;
+  rdfs:range tlc:Context;
+  owl:inverseOf mcl:acquiredBy;
+  .
+
+mcl:locatedAt a owl:ObjectProperty, owl:FunctionalProperty;
+  rdfs:comment "Indicates the location directly related to a context information, or directly where an entity is located..";
+  rdfs:range tlc:Location.
+
+mcl:indirectlyLocatedAt a owl:ObjectProperty, owl:TransitiveProperty;
+  rdfs:comment "Indicates any location related to a context information or an entity, through transitivity.";
+  rdfs:range tlc:Location.
+
+mcl:WithAttribute a owl:Class;
+  rdfs:comment "A marker class used to denote properties used as attributes to represent context information.";
+  .
+
+mcl:onProperty a owl:ObjectProperty, owl:FunctionalProperty;
+  rdfs:comment "Indicates on which property the related attribute description applies.";
+  rdfs:domain [ owl:unionOf ( mcl:WithAttribute mcl:AttributeBinding ) ] ;
+  rdfs:range rdf:Property ;
+  .
+
+mcl:onRange a owl:ObjectProperty, owl:FunctionalProperty;
+  rdfs:comment "Restricts the range of the property related to the described attribute.";
+  rdfs:domain mcl:WithAttribute ;
+  .
+
+mcl:onDomain a owl:ObjectProperty, owl:FunctionalProperty;
+  rdfs:comment "Restricts the context class used to derive an attribute.";
+  rdfs:domain mcl:AttributeBinding ;
+  rdfs:range owl:Class ;
+  .
+
+mcl:referenceUnit a owl:ObjectProperty, owl:FunctionalProperty ;
+  rdfs:comment "Indicates the preferred reference unit for a context attribute." ;
+  rdfs:domain mcl:WithAttribute ;
+  rdfs:range qu:Unit ;
+  .
+
+mcl:Derivation a owl:Class;
+  rdfs:comment "A description of how a context class or attribute can be derived from others." ;
+  .
+
+mcl:derived a owl:ObjectProperty, owl:FunctionalProperty ;
+  rdfs:comment "Describes how a context class or attribute can be derived from others." ;
+  rdfs:domain [ owl:unionOf ( mcl:WithAttribute rdf:Property ) ] ;
+  rdfs:range mcl:Derivation ;
+  .
+
+mcl:fromAttribute a owl:ObjectProperty;
+  rdfs:comment "Indicates an attribute to be bound to a derivation rule" ;
+  rdfs:domain mcl:Derivation;
+  rdfs:range mcl:AttributeBinding;
+  .
+
+mcl:fromExpression a owl:DatatypeProperty, owl:FunctionalProperty;
+  rdfs:comment "Indicates a SPARQL compatible expression that derives the bound attributes.";
+  rdfs:domain mcl:Derivation;
+  rdfs:range xsd:string;
+  .
+
+mcl:AttributeBinding a owl:Class;
+  rdfs:comment "An attribute that is bound to a derivation rule." ;
+  .

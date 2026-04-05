@@ -1,0 +1,50 @@
+PREFIX : <http://nesped1.caf.ufv.br/micelio/simulation/trash#>
+PREFIX sim: <http://nesped1.caf.ufv.br/micelio/simulation#>
+PREFIX mcl: <http://nesped1.caf.ufv.br/micelio/ontology#>
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX qu: <http://purl.oclc.org/NET/ssnx/qu/qu#>
+PREFIX unit: <http://purl.oclc.org/NET/ssnx/qu/unit#>
+PREFIX tlc: <http://gessi.lsi.upc.edu/threelevelcontextmodelling/ThreeLContextOnt/UpperLevelOntology#>
+
+sim:Case2 a sim:TestCase ;
+    sim:usesIPv6 false;
+    sim:prefix <http://nesped1.caf.ufv.br/micelio/simulation/trash#>;
+    sim:cloudLayer [
+        sim:initWith "data/simulation/trash-model.ttl";
+        sim:port 4242;
+        sim:linkToFog [
+            sim:dataRate [ rdf:value 1; qu:unit unit:gbps ];
+            sim:delay [ rdf:value 10; qu:unit unit:millisecond ];
+        ];
+        sim:linkToEdge [
+            sim:dataRate [ rdf:value 1; qu:unit unit:gbps ];
+            sim:delay [ rdf:value 100; qu:unit unit:millisecond ];
+        ];
+    ];
+    sim:fogLayer [
+        sim:nodes 5;
+        sim:port 4242;
+        sim:linkToEdge [
+            sim:dataRate [ rdf:value 100; qu:unit unit:mbps ];
+            sim:delay [ rdf:value 5; qu:unit unit:nanosecond ];
+        ];
+    ];
+    sim:edgeLayer [
+        sim:nodes 20;
+        sim:userNodes 5;
+        sim:nodesPerAp 4;
+        sim:initWith "data/archive/trash-data-20.ttl";
+        sim:acquiring mcl:CategorizedImage, mcl:EntityImage;
+    ];
+    sim:learning [
+        sim:testFrac 0.2;
+        sim:validationFrac 0.2;
+        sim:seed 42;
+        sim:task :TrashCategorization;
+        sim:flAlgorithm mcl:DefaultFedAvg;
+        sim:mlAlgorithm mcl:ResNet18ImageClassifier;
+    ];
+    .

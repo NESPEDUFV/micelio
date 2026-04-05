@@ -1,0 +1,20 @@
+[package]
+name    = "micelio-rdf"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+chrono    = "0.4.44"
+logos     = "0.16.1"
+oxiri     = "0.2.11"
+oxrdf     = { version = "0.3.0", features = ["oxsdatatypes"] }
+oxttl     = { version = "0.2.1", optional = true }
+serde     = { version = "1.0.228", optional = true }
+smallvec  = { version = "1.15.1", optional = true }
+thiserror = "2.0.17"
+
+[features]
+default  = ["serde", "ttl"]
+serde    = ["dep:serde", "oxiri/serde"]
+smallvec = ["dep:smallvec"]
+ttl      = ["dep:oxttl"]

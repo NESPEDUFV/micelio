@@ -1,0 +1,94 @@
+BASE <http://nesped1.caf.ufv.br/micelio/ontology>
+PREFIX mcl: <http://nesped1.caf.ufv.br/micelio/ontology#>
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX qu: <http://purl.oclc.org/NET/ssnx/qu/qu#>
+PREFIX unit: <http://purl.oclc.org/NET/ssnx/qu/unit#>
+PREFIX tlc: <http://gessi.lsi.upc.edu/threelevelcontextmodelling/ThreeLContextOnt/UpperLevelOntology#>
+
+<ontology/node> a owl:Ontology;
+  rdfs:comment "Goal: describe computing continuum nodes that are available to the middleware.";
+  owl:imports <ontology/model>, <ontology/unit>.
+
+mcl:ComputationalEntity a owl:Class;
+  rdfs:subClassOf tlc:Entity;
+  rdfs:comment "Any kind of computational entity.".
+
+mcl:CcNode a owl:Class;
+  rdfs:subClassOf mcl:ComputationalEntity;
+  rdfs:comment "A node that is available in the Computing Continuum.";
+  .
+
+mcl:FogNode a owl:Class;
+  rdfs:subClassOf mcl:CcNode;
+  rdfs:comment "A node in the fog layer.";
+  .
+
+mcl:EdgeNode a owl:Class;
+  rdfs:subClassOf mcl:CcNode;
+  rdfs:comment "A node in the edge layer.";
+  .
+
+mcl:hasTotalMemory a owl:ObjectProperty;
+  rdfs:domain mcl:ComputationalEntity;
+  .
+
+mcl:hasAvailableMemory a owl:ObjectProperty;
+  rdfs:domain mcl:ComputationalEntity;
+  .
+
+mcl:hasTotalStorage a owl:ObjectProperty;
+  rdfs:domain mcl:ComputationalEntity;
+  .
+
+mcl:hasAvailableStorage a owl:ObjectProperty;
+  rdfs:domain mcl:ComputationalEntity;
+  .
+
+mcl:hasInternetAddress a owl:DatatypeProperty;
+  rdfs:domain mcl:CcNode;
+  rdfs:range xsd:string;
+  .
+
+mcl:hasGeolocation a owl:ObjectProperty;
+  rdfs:domain tlc:Entity;
+  rdfs:range mcl:Geolocation;
+  .
+
+mcl:Geolocation a owl:Class;
+  rdfs:subClassOf tlc:Location;
+  .
+
+mcl:NodeGeolocation a owl:Class;
+  mcl:visibility mcl:Public;
+  rdfs:subClassOf
+    mcl:Geolocation,
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty mcl:x;
+      mcl:onRange xsd:double;
+    ],
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty mcl:y;
+      mcl:onRange xsd:double;
+    ],
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty mcl:z;
+      mcl:onRange xsd:double;
+    ],
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty mcl:isLocationOf;
+      mcl:onRange mcl:CcNode;
+    ]
+  .
+
+mcl:isLocationOf a owl:ObjectProperty;
+  rdfs:domain tlc:Location;
+  rdfs:range tlc:Entity;
+  owl:inverseOf mcl:locatedAt;
+  .
