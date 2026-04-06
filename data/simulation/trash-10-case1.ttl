@@ -40,7 +40,7 @@ sim:Case2 a sim:TestCase ;
         sim:useCsma true;
         sim:nodes 10;
         sim:userNodes 1;
-        sim:initWith "data/archive/trash-data-10.ttl";
+        sim:initWith "data/trash/10.ttl";
         sim:acquiring mcl:CategorizedImage, mcl:EntityImage;
         sim:link [
             sim:dlBandwidth [ rdf:value 10 ; qu:unit unit:megahertz ] ;

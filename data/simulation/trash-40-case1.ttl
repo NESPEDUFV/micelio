@@ -36,7 +36,7 @@ sim:Case2 a sim:TestCase ;
         sim:nodes 40;
         sim:userNodes 5;
         sim:nodesPerAp 4;
-        sim:initWith "data/archive/trash-data-40.ttl";
+        sim:initWith "data/trash/40.ttl";
         sim:acquiring mcl:CategorizedImage, mcl:EntityImage;
     ];
     sim:learning [

@@ -31,6 +31,7 @@ LIBTORCH= # caminho para pasta contendo a biblioteca torch
 RESNET_PATH= # caminho para o modelo pré-treinado headless da resnet18
 MICELIO_ML_DIRECTORY= # caminho para uma pasta onde modelos treinados podem ser salvos
 ```
+- (opcional) Obtenha o [conjunto de dados](https://huggingface.co/datasets/garythung/trashnet) e formate-o com o script `./scripts/prepare-data.py`.
 - Execute `make run`.
 
 
