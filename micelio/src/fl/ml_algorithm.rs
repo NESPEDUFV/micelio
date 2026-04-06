@@ -441,7 +441,7 @@ impl MlModel for ResNet18Model {
             .zip(max_probs)
             .zip(class_indices)
             .filter_map(|((item, prob), idx)| {
-                if prob <= 0.0 {
+                if prob <= 0.0 {  // TODO: add parameter to change threshold
                     return None;
                 }
                 let category = self.categories.get(idx as usize)?.clone();

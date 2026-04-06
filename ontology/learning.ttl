@@ -13,27 +13,6 @@ PREFIX tlc: <http://gessi.lsi.upc.edu/threelevelcontextmodelling/ThreeLContextOn
   rdfs:comment "Goal: describe federated learning related information.";
   owl:imports <ontology/model>, <ontology/unit>.
 
-
-mcl:LearningRole a owl:Class;
-  rdfs:subClassOf tlc:Role;
-  rdfs:comment "A role a CCNode can take during a learning task.".
-
-mcl:LearningCoordinator a owl:Class;
-  rdfs:subClassOf mcl:LearningRole.
-
-mcl:LearningAggregator a owl:Class;
-  rdfs:subClassOf mcl:LearningRole.
-
-mcl:LearningLocalAggregator a owl:Class;
-  rdfs:subClassOf mcl:LearningAggregator.
-
-mcl:LearningGlobalAggregator a owl:Class;
-  rdfs:subClassOf mcl:LearningAggregator.
-
-mcl:LearningClient a owl:Class;
-  rdfs:subClassOf mcl:LearningRole;
-  .
-
 mcl:LearningTaskLayout a owl:Class;
   rdfs:comment "A description of how a machine learning task should be performed by the middleware.";
   rdfs:subClassOf tlc:Activity,

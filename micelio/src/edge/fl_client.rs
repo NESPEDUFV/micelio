@@ -69,7 +69,6 @@ impl FlClient {
         let mut ctx = self.ctx.lock().await;
         let mut alg = self.ml_algorithm.lock().await;
         ctx.round = request.round;
-        // nsrs::log!("[FlClient] train #{}", ctx.round);
         if let Some(weights) = request.weights.as_ref() {
             alg.apply_weights(&mut ctx, weights).await?;
         }
@@ -79,7 +78,6 @@ impl FlClient {
     }
 
     pub(crate) async fn evaluate(&self, request: EdgeEvalRequest) -> MlResult<()> {
-        // nsrs::log!("[FlClient] evaluate");
         let mut ctx = self.ctx.lock().await;
         let mut alg = self.ml_algorithm.lock().await;
         ctx.round = request.round;
