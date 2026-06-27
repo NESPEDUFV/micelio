@@ -1,5 +1,12 @@
 # Micelio: **MI**ddleware for **C**ontext r**E**asoning through federated **L**earning in the **IO**T computing continuum
 
+## Fluxo de mensagens e ontologia
+
+<img width="1143" height="1600" alt="micelio-flow" src="https://github.com/user-attachments/assets/e5404fbc-0896-48d4-bd8d-d41c0318c506" />
+
+<img width="1600" height="561" alt="micelio-ontologia" src="https://github.com/user-attachments/assets/41484c2a-0119-4c6c-9c76-07d968620e95" />
+
+
 ## Simulação
 
 Para executar uma simulação, siga os seguintes passos:
