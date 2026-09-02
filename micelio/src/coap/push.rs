@@ -51,29 +51,22 @@ impl CoapTcpPush {
         let mut len_buf = [0u8; 8];
         let mut buf = [0u8; Packet::MAX_SIZE];
         while let Ok(_) = stream.recv_all(&mut len_buf).await {
-            let t0 = nsrs::time::now_delta();
             let n = usize::from_le_bytes(len_buf).min(buf.len());
             if n == 0 {
                 continue;
             }
             stream.recv_all(&mut buf[..n]).await?;
-            nsrs::log!("[metrics/CoapTcpPush][peer={peer}] received bytes: {}", n);
             let packet = Packet::from_bytes(&buf[..n]).map_err(io::Error::other)?;
             let request = Box::new(CoapRequest::from_packet(packet, ()));
             let request = handler(request).await;
             let Some(response) = request.response else {
                 continue;
             };
-            let data = response.message.to_bytes().map_err(io::Error::other)?;
+            let data = response.message.to_bytes_unlimited().map_err(io::Error::other)?;
             let data_size = data.len();
             stream.send_all(&data_size.to_le_bytes()).await?;
             stream.send_all(&data).await?;
             stream.flush().await?;
-            nsrs::log!("[metrics/CoapTcpPush][peer={peer}] sent bytes: {data_size}");
-            nsrs::log!(
-                "[metrics/CoapTcpPush][peer={peer}] latency (s): {}",
-                (nsrs::time::now_delta() - t0).as_secs_f64()
-            );
         }
         Ok(())
     }

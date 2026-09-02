@@ -1,5 +1,5 @@
 BASE <http://nesped1.caf.ufv.br/micelio/simulation/bikes>
-PREFIX : <http://nesped1.caf.ufv.br/micelio/simulation/bikes#>
+PREFIX bikes: <http://nesped1.caf.ufv.br/micelio/simulation/bikes#>
 PREFIX mcl: <http://nesped1.caf.ufv.br/micelio/ontology#>
 PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
@@ -9,105 +9,146 @@ PREFIX qu: <http://purl.oclc.org/NET/ssnx/qu/qu#>
 PREFIX unit: <http://purl.oclc.org/NET/ssnx/qu/unit#>
 PREFIX tlc: <http://gessi.lsi.upc.edu/threelevelcontextmodelling/ThreeLContextOnt/UpperLevelOntology#>
 
-# bike sharing:
-#   target: count
-#   key: hour_slot, site_id
-#   features:
-#     - real_temperature
-#     - apparent_temperature
-#     - humidity
-#     - wind_speed
-#     - weather_code
-#     - is_holiday
-#     - is_weekend
-#     - season
-
-:BikeShareTask a mcl:LearningTaskLayout;
-  mcl:hasTarget :BikeShareDemand;
-  mcl:hasFeature :BikeShareEventsAggregate;
+bikes:BikeShareTask a mcl:LearningTaskLayout;
+  mcl:hasTarget bikes:BikeShareDemand;
+  mcl:hasFeature bikes:BikeShareEventsAggregate;
+  mcl:hasPredictFilter """FILTER NOT EXISTS { ?ctx bikes:demand ?demand  }""";
   .
 
-:BikeShareEventsKey a owl:Class;
+bikes:BikeShareDemand a owl:Class;
+  mcl:visibility mcl:Public;
   rdfs:subClassOf
+    tlc:State,
     [
       a mcl:WithAttribute;
-      mcl:onProperty :hourSlot;
+      mcl:onProperty bikes:hourSlot;
       mcl:onRange xsd:dateTimeStamp;
       mcl:isKey true;
-      mcl:derived [
-        mcl:fromAttribute [ mcl:onDomain :BikeShareEvent; mcl:onProperty :hourSlot ];
-      ];
     ],
     [
       a mcl:WithAttribute;
       mcl:onProperty mcl:locatedAt;
-      mcl:onRange :MonitoringLocation;
+      mcl:onRange bikes:Station;
       mcl:isKey true;
-      mcl:derived [
-        mcl:fromAttribute [ mcl:onDomain :BikeShareEvent; mcl:onProperty mcl:locatedAt ];
-      ];
-    ];
-  .
-
-:BikeShareDemand a owl:Class;
-  mcl:visibility mcl:Public;
-  rdfs:subClassOf
-    tlc:State,
-    :BikeShareEventsKey,
+    ],
     [
       a mcl:WithAttribute;
-      mcl:onProperty :demand;
+      mcl:onProperty bikes:demand;
       mcl:onRange xsd:nonNegativeInteger;
-      mcl:derived [
-        mcl:fromAttribute [ mcl:onDomain :BikeShareEvent; mcl:onProperty mcl:acquiredAt ];
-        mcl:fromExpression "COUNT(?acquiredAt)";
-      ];
     ];
-    .
+  mcl:derived [
+    mcl:onDomain bikes:BikeShareEvent;
+    mcl:query """?ctx bikes:demand ?demand."""];
+  .
 
-:BikeShareEventsAggregate a owl:Class;
+bikes:BikeShareEventsAggregate a owl:Class;
   mcl:visibility mcl:Private;
   rdfs:subClassOf
     tlc:State,
-    :BikeShareEventsKey,
     [
       a mcl:WithAttribute;
-      mcl:onProperty :avgRealTemperature;
-      mcl:onRange xsd:double;
-      mcl:derived [
-        mcl:fromAttribute [ mcl:onDomain :RealTemperature; mcl:onProperty rdf:value; rdf:label "rt" ] ;
-        mcl:fromExpression "AVG(?rt)";
-      ] ;
+      mcl:onProperty bikes:hourSlot;
+      mcl:onRange xsd:dateTimeStamp;
+      mcl:isKey true;
     ],
     [
       a mcl:WithAttribute;
-      mcl:onProperty :avgApparentTemperature;
-      mcl:onRange xsd:double;
-      mcl:derived [
-        mcl:fromAttribute [ mcl:onDomain :ApparentTemperature; mcl:onProperty rdf:value; rdf:label "at" ] ;
-        mcl:fromExpression "AVG(?at)";
-      ] ;
+      mcl:onProperty mcl:locatedAt;
+      mcl:onRange bikes:Station;
+      mcl:isKey true;
     ],
     [
       a mcl:WithAttribute;
-      mcl:onProperty :avgWindSpeed;
+      mcl:onProperty mcl:latitude;
       mcl:onRange xsd:double;
-      mcl:derived [
-        mcl:fromAttribute [ mcl:onDomain :WindSpeed; mcl:onProperty rdf:value; rdf:label "ws" ] ;
-        mcl:fromExpression "AVG(?ws)";
-      ] ;
+    ],
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty mcl:longitude;
+      mcl:onRange xsd:double;
+    ],
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty bikes:isHoliday;
+      mcl:onRange xsd:boolean;
+    ],
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty bikes:isWeekend;
+      mcl:onRange xsd:nonNegativeInteger;
+    ],
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty bikes:month;
+      mcl:onRange xsd:nonNegativeInteger;
+    ],
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty bikes:hour;
+      mcl:onRange xsd:nonNegativeInteger;
+    ],
+    # [
+    #   a mcl:WithAttribute;
+    #   mcl:onProperty bikes:weatherCondition;
+    #   mcl:onRange bikes:WeatherCode;
+    # ],
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty bikes:temperature;
+      mcl:onRange xsd:double;
+    ],
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty bikes:relativeHumidity;
+      mcl:onRange xsd:double;
+    ],
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty bikes:precipitation;
+      mcl:onRange xsd:double;
+    ],
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty bikes:windSpeed;
+      mcl:onRange xsd:double;
+    ],
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty bikes:cloudCoverage;
+      mcl:onRange xsd:double;
+    ],
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty bikes:airPressure;
+      mcl:onRange xsd:double;
     ];
-  .
-
-:hourSlot a owl:DatatypeProperty;
-  rdfs:range xsd:dateTimeStamp;
   mcl:derived [
-    mcl:fromAttribute [ mcl:onProperty mcl:acquiredAt ];
-    mcl:fromExpression "TIMESLOT('HOUR', ?acquiredAt)";
-  ];
+    mcl:onDomain bikes:WeatherMetrics, mcl:Geolocation;
+    mcl:query """
+?ctx a bikes:BikeShareEventsAggregate;
+    bikes:hourSlot ?hourSlot;
+    mcl:locatedAt ?locatedAt;
+    bikes:temperature ?temperature;
+    bikes:relativeHumidity ?relativeHumidity;
+    bikes:precipitation ?precipitation;
+    bikes:windSpeed ?windSpeed;
+    bikes:cloudCoverage ?cloudCoverage;
+    bikes:airPressure ?airPressure;
+    bikes:isHoliday ?isHoliday;
+    bikes:isWeekend ?isWeekend;
+    bikes:month ?month;
+    bikes:hour ?hour;
+    mcl:latitude ?latitude;
+    mcl:longitude ?longitude;
+    .
+"""];
   .
 
-:MonitoringLocation a owl:Class;
+bikes:hourSlot a owl:DatatypeProperty;
+  rdfs:range xsd:dateTimeStamp;
+  .
+
+bikes:BikeShareStation a owl:Class;
   rdfs:subClassOf
     tlc:Location,
     [
@@ -118,46 +159,99 @@ PREFIX tlc: <http://gessi.lsi.upc.edu/threelevelcontextmodelling/ThreeLContextOn
     ];
   .
 
-:BikeShareEvent a owl:Class;
-  rdfs:subClassOf tlc:Event, :LocatedAtMonitoringLocation;
+bikes:BikeShareEvent a owl:Class;
+  rdfs:subClassOf
+    tlc:Event,
+    [ a mcl:WithAttribute ;
+      mcl:onProperty mcl:acquiredAt ;
+      mcl:onRange xsd:dateTimeStamp ;
+      mcl:isKey true ;
+    ],
+    bikes:LocatedAtStation;
   .
 
-:Temperature a owl:Class;
+bikes:WeatherMetrics a owl:Class;
   rdfs:subClassOf
     tlc:State,
-    :LocatedAtMonitoringLocation,
-    mcl:TimedContext,
     [
       a mcl:WithAttribute;
-      mcl:onProperty rdf:value;
+      mcl:onProperty bikes:hourSlot;
+      mcl:onRange xsd:dateTimeStamp;
+    ],
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty bikes:temperature;
       mcl:onRange xsd:double;
       mcl:referenceUnit unit:degreeCelsius;
-    ];
-  .
-
-:RealTemperature a owl:Class;
-  rdfs:subClassOf :Temperature;
-  .
-
-:ApparentTemperature a owl:Class;
-  rdfs:subClassOf :Temperature;
-  .
-
-:WindSpeed a owl:Class;
-  rdfs:subClassOf
-    tlc:State,
-    :LocatedAtMonitoringLocation,
-    mcl:TimedContext,
+    ],
     [
       a mcl:WithAttribute;
-      mcl:onProperty rdf:value;
+      mcl:onProperty bikes:relativeHumidity;
       mcl:onRange xsd:double;
-      mcl:referenceUnit unit:metrePerSecond;
+      mcl:referenceUnit unit:percent;
+    ],
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty bikes:precipitation;
+      mcl:onRange xsd:double;
+      mcl:referenceUnit unit:millimetre;
+    ],
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty bikes:windSpeed;
+      mcl:onRange xsd:double;
+    ],
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty bikes:cloudCoverage;
+      mcl:onRange xsd:double;
+    ],
+    [
+      a mcl:WithAttribute;
+      mcl:onProperty bikes:airPressure;
+      mcl:onRange xsd:double;
     ];
+    # [
+    #   a mcl:WithAttribute;
+    #   mcl:onProperty bikes:weatherCondition;
+    #   mcl:onRange bikes:WeatherCode;
+    # ];
   .
 
-:LocatedAtMonitoringLocation a mcl:WithAttribute;
+bikes:LocatedAtStation a mcl:WithAttribute;
   mcl:onProperty mcl:locatedAt;
-  mcl:onRange :MonitoringLocation;
+  mcl:onRange bikes:Station;
   mcl:isKey true;
   .
+
+bikes:WeatherCode a owl:Class;
+  owl:hasKey ( bikes:code );
+  .
+
+bikes:ClearWeather a bikes:WeatherCode; bikes:code 1.
+bikes:FairWeather a bikes:WeatherCode; bikes:code 2.
+bikes:CloudyWeather a bikes:WeatherCode; bikes:code 3.
+bikes:OvercastWeather a bikes:WeatherCode; bikes:code 4.
+bikes:FogWeather a bikes:WeatherCode; bikes:code 5.
+bikes:FreezingFogWeather a bikes:WeatherCode; bikes:code 6.
+bikes:LightRainWeather a bikes:WeatherCode; bikes:code 7.
+bikes:RainWeather a bikes:WeatherCode; bikes:code 8.
+bikes:HeavyRainWeather a bikes:WeatherCode; bikes:code 9.
+bikes:FreezingRainWeather a bikes:WeatherCode; bikes:code 10.
+bikes:HeavyFreezingRainWeather a bikes:WeatherCode; bikes:code 11.
+bikes:SleetWeather a bikes:WeatherCode; bikes:code 12.
+bikes:HeavySleetWeather a bikes:WeatherCode; bikes:code 13.
+bikes:LightSnowfallWeather a bikes:WeatherCode; bikes:code 14.
+bikes:SnowfallWeather a bikes:WeatherCode; bikes:code 15.
+bikes:HeavySnowfallWeather a bikes:WeatherCode; bikes:code 16.
+bikes:RainShowerWeather a bikes:WeatherCode; bikes:code 17.
+bikes:HeavyRainShowerWeather a bikes:WeatherCode; bikes:code 18.
+bikes:SleetShowerWeather a bikes:WeatherCode; bikes:code 19.
+bikes:HeavySleetShowerWeather a bikes:WeatherCode; bikes:code 20.
+bikes:SnowShowerWeather a bikes:WeatherCode; bikes:code 21.
+bikes:HeavySnowShowerWeather a bikes:WeatherCode; bikes:code 22.
+bikes:LightningWeather a bikes:WeatherCode; bikes:code 23.
+bikes:HailWeather a bikes:WeatherCode; bikes:code 24.
+bikes:ThunderstormWeather a bikes:WeatherCode; bikes:code 25.
+bikes:HeavyThunderstormWeather a bikes:WeatherCode; bikes:code 26.
+bikes:StormWeather a bikes:WeatherCode; bikes:code 27.

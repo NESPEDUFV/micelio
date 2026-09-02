@@ -10,7 +10,7 @@ use crate::{
     kdb::GlobalKdb,
 };
 use futures::lock::Mutex;
-use micelio_rdf::Name;
+use micelio_rdf::{Name, Namespaced};
 use oxiri::Iri;
 use std::{io, net::SocketAddr, sync::Arc};
 
@@ -36,25 +36,29 @@ impl FlClient {
         let agg_iri = prefixes
             .resolve(&request.agg_name)
             .ok_or_else(|| NameError(request.agg_name))?;
-        let mut ml_algorithm = get_ml_algorithm(&client, request.ml_algorithm, request.params)?;
-        let dataset = request
-            .task_class
-            .get_training_dataset(client.kdb.as_ref())
-            .await
-            .map_err(EdgeStartTaskError::FailedDataset)?;
         let mut ctx = FlContext::new(
             CcLayer::Edge,
             Some(request.agg_addr),
             client.node_iri.clone(),
             task_iri,
-            request.task_class,
+            request.task_layout,
             kdb,
             Some(Arc::new(GlobalKdb::new(client.cloud_addr))),
         );
+        let t0 = nsrs::time::now_delta();
+        let dataset = ctx
+            .task_layout()
+            .get_training_dataset(client.kdb.as_ref())
+            .map_err(EdgeStartTaskError::FailedDataset)?;
+        nsrs::metric!("[metrics/FlClient] dataset extraction time (s): {}",  (nsrs::time::now_delta() - t0).as_secs_f64());
+        let mut ml_algorithm =
+            get_ml_algorithm(&client, request.ml_algorithm, &mut ctx, request.params)?;
+        nsrs::log!("[FlClient][{}] training dataset, n triples: {}", ctx.task_layout_name(), dataset.len());
+        let t0 = nsrs::time::now_delta();
         ml_algorithm
             .transform(&mut ctx, dataset)
-            .await
             .map_err(EdgeStartTaskError::MlDataFail)?;
+        nsrs::metric!("[metrics/FlClient] dataset transform time (s): {}",  (nsrs::time::now_delta() - t0).as_secs_f64());
         ctx.finish_acquisition().await?;
         Ok(Self {
             client,
@@ -69,10 +73,12 @@ impl FlClient {
         let mut ctx = self.ctx.lock().await;
         let mut alg = self.ml_algorithm.lock().await;
         ctx.round = request.round;
+        let t0 = nsrs::time::now_delta();
         if let Some(weights) = request.weights.as_ref() {
-            alg.apply_weights(&mut ctx, weights).await?;
+            alg.apply_weights(&mut ctx, weights)?;
         }
-        let new_weights = alg.train(&mut ctx).await?;
+        let new_weights = alg.train(&mut ctx)?;
+        nsrs::metric!("[metrics/FlClient] training time (s): {}",  (nsrs::time::now_delta() - t0).as_secs_f64());
         ctx.finish_acquisition().await?;
         Ok(new_weights)
     }
@@ -81,33 +87,38 @@ impl FlClient {
         let mut ctx = self.ctx.lock().await;
         let mut alg = self.ml_algorithm.lock().await;
         ctx.round = request.round;
-        alg.apply_weights(&mut ctx, &request.weights).await?;
-        alg.evaluate(&mut ctx).await?;
+        let t0 = nsrs::time::now_delta();
+        alg.apply_weights(&mut ctx, &request.weights)?;
+        alg.evaluate(&mut ctx)?;
+        nsrs::metric!("[metrics/FlClient] evaluation time (s): {}",  (nsrs::time::now_delta() - t0).as_secs_f64());
         ctx.finish_acquisition().await?;
         Ok(())
     }
 
     pub(crate) async fn finish(&self, request: FinishTaskRequest) -> MlResult<()> {
-        nsrs::log!("[FlClient] finish");
         let mut ctx = self.ctx.lock().await;
         let mut alg = self.ml_algorithm.lock().await;
-        alg.apply_weights(&mut ctx, &request.weights).await?;
-        let current_model = alg.current_model()?;
+        alg.apply_weights(&mut ctx, &request.weights)?;
+        let (algorithm_iri, current_model) = alg.current_model()?;
         self.client
             .ml_registry
-            .store_model(&mut ctx, current_model)
+            .store_model(&mut ctx, current_model)?;
+        self.client
+            .ml_registry
+            .publish_model(&mut ctx, algorithm_iri)
             .await?;
         ctx.finish_acquisition().await?;
         Ok(())
     }
 
-    pub(crate) fn run(self) {
+    pub(crate) fn run(mut self) {
         nsrs::spawn({
-            nsrs::log!("[FlClient] start");
+            let task = self.ctx.get_mut().task_layout_name();
+            nsrs::log!("[FlClient][{task}] start");
             async move {
                 match self.run_inner().await {
                     Ok(()) => {}
-                    Err(e) => nsrs::log!("[FlClient] error: {e}"),
+                    Err(e) => nsrs::log!("[FlClient][{task}] error: {e}"),
                 };
             }
         });
@@ -142,6 +153,7 @@ impl FlClient {
 fn get_ml_algorithm(
     client: &EdgeClient,
     algorithm: Name,
+    ctx: &mut FlContext,
     params: Config,
 ) -> Result<Box<dyn MlAlgorithm>, EdgeStartTaskError> {
     let algorithm_iri = match client.kdb.prefixes().resolve(&algorithm) {
@@ -150,7 +162,7 @@ fn get_ml_algorithm(
     };
     match client
         .ml_registry
-        .start_algorithm(algorithm_iri.as_ref(), params)
+        .start_algorithm(algorithm_iri.as_ref(), ctx, params)
     {
         Some(Ok(a)) => Ok(a),
         Some(Err(e)) => Err(EdgeStartTaskError::MlStartFail(algorithm, e)),

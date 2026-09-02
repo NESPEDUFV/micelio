@@ -42,13 +42,13 @@ impl FlAggregator {
             .prefixes()
             .resolve(&request.task_name)
             .ok_or_else(|| NameError(request.task_name))?;
-        let task_class = request.task_class;
+        let task_layout = request.task_layout;
         let ctx = FlContext::new(
             CcLayer::Fog,
             Some(broker.cloud_addr),
             broker.node_iri.clone(),
             task_iri,
-            task_class,
+            task_layout,
             broker.kdb.clone(),
             Some(Arc::new(GlobalKdb::new(broker.cloud_addr))),
         );
@@ -64,7 +64,11 @@ impl FlAggregator {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let (tx, rx) = mpsc::unbounded();
-        nsrs::log!("[FlAggregator] clients: {:?}", clients.len());
+        nsrs::log!(
+            "[FlAggregator][{}] clients: {:?}",
+            ctx.task_layout_name(),
+            clients.len()
+        );
         Ok(Self {
             broker,
             fl_algorithm,
@@ -81,7 +85,11 @@ impl FlAggregator {
         self: Arc<Self>,
         request: FogRoundTrainRequest,
     ) -> Result<(), FogRoundTrainError> {
-        nsrs::log!("[FlAggregator] training #{:?}", request.round);
+        let task_name = {
+            let ctx = self.ctx.lock().await;
+            ctx.task_layout_name()
+        };
+        nsrs::log!("[FlAggregator][{task_name}] training #{:?}", request.round);
         let selected = {
             let mut ctx = self.ctx.lock().await;
             ctx.round = request.round;
@@ -89,7 +97,10 @@ impl FlAggregator {
                 .select_train(&mut ctx, &self.clients)
                 .await?
         };
-        nsrs::log!("[FlAggregator] selected {} nodes", selected.len());
+        nsrs::log!(
+            "[FlAggregator][{task_name}] selected {} nodes",
+            selected.len()
+        );
         let weights = self.weights.lock().await.clone();
         let all_weights: Vec<_> = nsrs::join_all_with_timeout(
             Duration::from_secs(240),
@@ -110,9 +121,13 @@ impl FlAggregator {
         .await
         .into_done_ok()?;
         let (nodes, weights): (Vec<_>, Vec<_>) = all_weights.into_iter().unzip();
+        nsrs::log!(
+            "[FlAggregator][{task_name}] got {} client responses",
+            weights.len()
+        );
         let new_weights = {
             let mut ctx = self.ctx.lock().await;
-            acquire_aggregation(&mut ctx, &nodes).await?;
+            acquire_aggregation(&mut ctx, &nodes)?;
             let new_weights = self
                 .fl_algorithm
                 .aggregate_train(&mut ctx, &nodes, &weights)
@@ -163,10 +178,15 @@ impl FlAggregator {
                 Ok::<_, FogGlobalAggError>((iri, msg.agg_addr))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let (nodes, addrs): (Vec<_>, Vec<_>) = agg_info.iter().map(|(a, b)| (a, *b)).unzip();
+        let (mut nodes, addrs): (Vec<_>, Vec<_>) = agg_info.iter().map(|(a, b)| (a, *b)).unzip();
+        let mut self_weights = self.weights.lock().await;
+        if let Some(w) = std::mem::take(&mut (*self_weights)) {
+            weights.push(w);
+            nodes.push(&self.broker.node_iri);
+        }
         let new_weights = {
             let mut ctx = self.ctx.lock().await;
-            acquire_aggregation(&mut ctx, &nodes).await?;
+            acquire_aggregation(&mut ctx, &nodes)?;
             let new_weights = self
                 .fl_algorithm
                 .aggregate_train(&mut ctx, &nodes, &weights)
@@ -175,7 +195,6 @@ impl FlAggregator {
             ctx.finish_acquisition().await?;
             new_weights
         };
-        let mut self_weights = self.weights.lock().await;
         *self_weights = Some(new_weights);
         let (round, task_name) = {
             let ctx = self.ctx.lock().await;
@@ -235,9 +254,13 @@ impl FlAggregator {
         self: Arc<Self>,
         request: FogRoundEvalRequest,
     ) -> Result<(), FogRoundEvalError> {
-        nsrs::log!("[FlAggregator] evaluating #{:?}", request.round);
         let selected = {
             let mut ctx = self.ctx.lock().await;
+            nsrs::log!(
+                "[FlAggregator][{}] evaluating #{:?}",
+                ctx.task_layout_name(),
+                request.round
+            );
             ctx.round = request.round;
             self.fl_algorithm
                 .select_eval(&mut ctx, &self.clients)

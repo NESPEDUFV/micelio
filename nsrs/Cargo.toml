@@ -5,7 +5,7 @@ edition = "2024"
 links   = "nsrs"
 
 [dependencies]
-chrono            = "0.4.44"
+chrono            = "0.4.41"
 crossbeam-channel = "0.5.15"
 cxx               = "1.0.187"
 futures           = "0.3.31"

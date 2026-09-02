@@ -74,6 +74,11 @@ mcl:ResNet18ImageClassifier a mcl:MlAlgorithm;
   mcl:inParadigm mcl:SupervisedLearning;
   .
 
+mcl:MlpRegressor a mcl:MlAlgorithm;
+  mcl:acquires mcl:DatasetSize, mcl:MeanSquaredError, mcl:RootMeanSquaredError, mcl:MeanAbsoluteError, mcl:MeanAbsolutePercentError;
+  mcl:inParadigm mcl:SupervisedLearning;
+  .
+
 mcl:EntityImage a owl:Class;
   rdfs:comment "An image of an entity.";
   rdfs:subClassOf
@@ -141,6 +146,11 @@ mcl:category a owl:ObjectProperty, owl:FunctionalProperty;
 mcl:Aggregation a owl:Class;
   rdfs:subClassOf
   tlc:Event,
+  [ a mcl:WithAttribute ;
+    mcl:onProperty mcl:acquiredAt ;
+    mcl:onRange xsd:dateTimeStamp ;
+    mcl:isKey true ;
+  ],
   [ a mcl:WithAttribute;
     mcl:onProperty mcl:forTask ],
   [ a mcl:WithAttribute;
@@ -162,7 +172,7 @@ mcl:DatasetSize a owl:Class;
   mcl:visibility mcl:Public;
   .
 
-mcl:Accuracy a owl:Class;
+mcl:EvaluationMetric a owl:Class;
   rdfs:subClassOf
     tlc:Profile,
     [ a mcl:WithAttribute;
@@ -175,6 +185,27 @@ mcl:Accuracy a owl:Class;
     [ a mcl:WithAttribute;
       mcl:onProperty mcl:forRound;
     ];
+  .
+
+mcl:Accuracy a owl:Class;
+  rdfs:subClassOf mcl:EvaluationMetric;
+  mcl:visibility mcl:Public;
+  .
+
+mcl:MeanSquaredError a owl:Class;
+  rdfs:subClassOf mcl:EvaluationMetric;
+  mcl:visibility mcl:Public;
+  .
+mcl:RootMeanSquaredError a owl:Class;
+  rdfs:subClassOf mcl:EvaluationMetric;
+  mcl:visibility mcl:Public;
+  .
+mcl:MeanAbsoluteError a owl:Class;
+  rdfs:subClassOf mcl:EvaluationMetric;
+  mcl:visibility mcl:Public;
+  .
+mcl:MeanAbsolutePercentError a owl:Class;
+  rdfs:subClassOf mcl:EvaluationMetric;
   mcl:visibility mcl:Public;
   .
 

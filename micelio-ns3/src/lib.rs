@@ -1,4 +1,6 @@
+mod baseline;
 mod cloud;
+mod coord;
 mod dto;
 mod edge;
 mod fog;
@@ -6,15 +8,12 @@ mod params;
 mod user;
 
 use cloud::CloudApp;
+use coord::CoordSpace;
 use edge::EdgeApp;
 use fog::FogApp;
 use nsrs::sync::Barrier;
 use params::SimulationParams;
-use std::{
-    path::PathBuf,
-    sync::RwLock,
-    time::{Duration, SystemTime},
-};
+use std::{path::PathBuf, sync::RwLock, time::Duration};
 use testcontainers::{
     Container, GenericImage, ImageExt,
     core::{CmdWaitFor, ExecCommand, IntoContainerPort, Mount, WaitFor},
@@ -31,20 +30,21 @@ mod ffi {
 
     pub struct FogAppParams {
         pub node_id: u32,
-        pub position: [f64; 3],
+        pub position: [f64; 2],
         pub cloud_addr: SocketAddr,
         pub local_addr: SocketAddr,
     }
 
     pub struct EdgeAppParams {
         pub node_id: u32,
-        pub position: [f64; 3],
+        pub node_name: String,
+        pub position: [f64; 2],
         pub cloud_addr: SocketAddr,
     }
 
     pub struct UserAppParams {
         pub node_id: u32,
-        pub position: [f64; 3],
+        pub position: [f64; 2],
         pub cloud_addr: SocketAddr,
         pub initial_edge_node: u32,
         pub is_leader: bool,
@@ -55,13 +55,30 @@ mod ffi {
         pub delay: f64,
     }
 
+    pub struct BriteNodeResult {
+        pub distance: f64,
+        pub id: u32,
+        pub lat: f64,
+        pub lng: f64,
+    }
+
     extern "Rust" {
         type SimulationParams;
         type SimSetup;
 
-        fn setup_train_data(self: &mut SimulationParams, nodes: &[u32]) -> Result<()>;
+        fn debug_mode(self: &SimulationParams) -> bool;
+        fn run_baseline_bikes(self: &SimulationParams);
+        fn run_baseline_trash(self: &SimulationParams);
+        fn setup_trash_data(self: &mut SimulationParams, nodes: &[u32]) -> Result<()>;
+        fn setup_bikes_stations(self: &mut SimulationParams) -> Result<()>;
+        fn get_station_name(self: &SimulationParams, i: usize) -> Result<&str>;
+        fn get_station_geopos(self: &SimulationParams, i: usize) -> Result<[f64; 2]>;
         fn n_edge_nodes(self: &SimulationParams) -> usize;
+        fn n_trash_edge_nodes(self: &SimulationParams) -> usize;
+        fn n_bikes_edge_nodes(self: &SimulationParams) -> usize;
         fn n_user_nodes(self: &SimulationParams) -> usize;
+        fn n_trash_user_nodes(self: &SimulationParams) -> usize;
+        fn n_bikes_user_nodes(self: &SimulationParams) -> usize;
         fn n_fog_nodes(self: &SimulationParams) -> usize;
         fn nodes_per_ap(self: &SimulationParams) -> usize;
         fn link_cloud_to_fog(self: &SimulationParams) -> WiredParams;
@@ -69,10 +86,12 @@ mod ffi {
         fn link_fog_to_edge(self: &SimulationParams) -> WiredParams;
         fn cloud_port(self: &SimulationParams) -> u16;
         fn fog_port(self: &SimulationParams) -> u16;
+        fn coord_space(self: &SimulationParams) -> Box<CoordSpace>;
+        fn brite_params(self: &SimulationParams) -> &str;
 
         fn read_params() -> Box<SimulationParams>;
         fn setup(params: &SimulationParams) -> Box<SimSetup>;
-        fn teardown(setup_cfg: Box<SimSetup>);
+        fn teardown(setup_cfg: Box<SimSetup>, params: &SimulationParams);
 
         type CloudApp;
         #[Self = "CloudApp"]
@@ -84,11 +103,24 @@ mod ffi {
 
         type EdgeApp;
         #[Self = "EdgeApp"]
-        fn spawn(sim_params: &SimulationParams, params: EdgeAppParams);
+        fn spawn_trash(sim_params: &SimulationParams, params: EdgeAppParams);
+        #[Self = "EdgeApp"]
+        fn spawn_bikes(sim_params: &SimulationParams, params: EdgeAppParams);
 
         type UserApp;
         #[Self = "UserApp"]
-        fn spawn(sim_params: &SimulationParams, params: UserAppParams);
+        fn spawn_trash(sim_params: &SimulationParams, params: UserAppParams);
+        #[Self = "UserApp"]
+        fn spawn_bikes(sim_params: &SimulationParams, params: UserAppParams);
+
+        type CoordSpace;
+        fn euclid_to_geo(self: &CoordSpace, x: f64, y: f64) -> [f64; 2];
+        fn brite_to_euclid(self: &CoordSpace, x: f64, y: f64) -> [f64; 2];
+        fn brite_to_geo(self: &CoordSpace, x: f64, y: f64) -> [f64; 2];
+        fn geo_to_euclid(self: &CoordSpace, lat: f64, lng: f64) -> [f64; 2];
+        fn add_node(self: &mut CoordSpace, id: u32, x: f64, y: f64);
+        fn remove_node(self: &mut CoordSpace, id: u32, lat: f64, lng: f64) -> Result<usize>;
+        fn nearest_node(self: &CoordSpace, lat: f64, lng: f64) -> Result<BriteNodeResult>;
     }
 
     #[namespace = "nsrs"]
@@ -99,10 +131,6 @@ mod ffi {
         type SocketAddr = nsrs::ffi::SocketAddr;
     }
 }
-
-pub static INIT_BARRIER: RwLock<Option<Barrier>> = RwLock::new(None);
-pub static TASK_BARRIER: RwLock<Option<Barrier>> = RwLock::new(None);
-pub static USER_BARRIER: RwLock<Option<Barrier>> = RwLock::new(None);
 
 pub struct SimSetup {
     pub container: Container<GenericImage>,
@@ -181,11 +209,10 @@ fn adjust_config(
     data_path: &PathBuf,
     params: &SimulationParams,
 ) {
-    std::fs::copy(
-        &params.cloud_layer.init_with,
-        data_path.join("simulation.ttl"),
-    )
-    .expect("should copy file");
+    for f in params.cloud_layer.init_with.iter() {
+        let fname = f.file_name().expect("file should be named");
+        std::fs::copy(f, data_path.join(fname)).expect("should copy file");
+    }
     let mut ttl_files = walkdir::WalkDir::new(data_path)
         .into_iter()
         .filter_map(|e| e.ok())
@@ -228,45 +255,59 @@ fn adjust_config(
     }
 }
 
-fn setup_barriers(params: &SimulationParams) {
-    {
-        let mut barrier = INIT_BARRIER.write().expect("should get the barrier rwlock");
-        *barrier = Some(Barrier::new(
-            params.n_fog_nodes() + params.n_edge_nodes() + 1,
-        ));
-    }
-    {
-        let mut barrier = TASK_BARRIER.write().expect("should get the barrier rwlock");
-        *barrier = Some(Barrier::new(params.n_user_nodes()));
-    }
-    {
-        let mut barrier = USER_BARRIER.write().expect("should get the barrier rwlock");
-        *barrier = Some(Barrier::new(params.n_user_nodes()));
-    }
+pub static INIT_BARRIER: RwLock<Option<Barrier>> = RwLock::new(None);
+pub static TRASH_TASK_BARRIER: RwLock<Option<Barrier>> = RwLock::new(None);
+pub static BIKES_TASK_BARRIER: RwLock<Option<Barrier>> = RwLock::new(None);
+pub static USER_BARRIER: RwLock<Option<Barrier>> = RwLock::new(None);
+
+#[macro_export]
+macro_rules! read_barrier {
+    ($B:ident) => {
+        $B.read()
+            .expect(&concat!("should get ", stringify!($B), " barrier lock"))
+            .as_ref()
+            .expect(&concat!(stringify!($B), " must be initialized"))
+            .clone()
+    };
 }
 
-pub fn teardown(setup_cfg: Box<SimSetup>) {
+fn setup_barriers(params: &SimulationParams) {
+    setup_barrier(
+        &INIT_BARRIER,
+        1 + params.n_fog_nodes() + params.n_edge_nodes() + params.n_user_nodes(),
+    );
+    setup_barrier(&TRASH_TASK_BARRIER, 1 + params.n_trash_user_nodes());
+    setup_barrier(&BIKES_TASK_BARRIER, 1 + params.n_bikes_user_nodes());
+    setup_barrier(&USER_BARRIER, params.n_user_nodes());
+}
+
+fn setup_barrier(barrier: &RwLock<Option<Barrier>>, n: usize) {
+    let mut barrier_lock = barrier.write().expect("should get the barrier rwlock");
+    *barrier_lock = Some(Barrier::new(n));
+}
+
+pub fn teardown(_setup_cfg: Box<SimSetup>, params: &SimulationParams) {
     println!("[teardown]");
-    let container = setup_cfg.container;
-    let db_path = {
-        let mut labels = vec!["DB".to_string()];
-        if let Ok(sim_id) = std::env::var("SIM_ID") {
-            labels.push(sim_id);
-        }
-        labels.push(
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .expect("tiemstamp should work")
-                .as_secs()
-                .to_string(),
-        );
-        format!("/fuseki/databases/{}", labels.join("_"))
-    };
-    let cmd = ExecCommand::new(["cp", "-r", "/fuseki/databases/DB2/", &db_path])
-        .with_cmd_ready_condition(CmdWaitFor::exit_code(0));
-    if let Err(_) = container.exec(cmd) {
-        let out = container.stderr_to_vec().unwrap_or_default();
-        let out = String::from_utf8_lossy(&out);
-        panic!("failed to copy DB:\n{out}");
+    let jena_home =
+        PathBuf::from(std::env::var("JENA_FUSEKI_HOME").expect("failed to get JENA_FUSEKI_HOME"));
+    let data_path = jena_home.join("data");
+    for f in params.cloud_layer.init_with.iter() {
+        let fname = f.file_name().expect("file should be named");
+        std::fs::remove_file(data_path.join(fname)).expect("should delete init file");
     }
+    // let container = setup_cfg.container;
+    // let db_path = {
+    //     let mut labels = vec!["DB".to_string()];
+    //     if let Ok(sim_id) = std::env::var("SIM_ID") {
+    //         labels.push(sim_id);
+    //     }
+    //     format!("/fuseki/databases/{}", labels.join("_"))
+    // };
+    // let cmd = ExecCommand::new(["cp", "-r", "/fuseki/databases/DB2/", &db_path])
+    //     .with_cmd_ready_condition(CmdWaitFor::exit_code(0));
+    // if let Err(_) = container.exec(cmd) {
+    //     let out = container.stderr_to_vec().unwrap_or_default();
+    //     let out = String::from_utf8_lossy(&out);
+    //     panic!("failed to copy DB:\n{out}");
+    // }
 }

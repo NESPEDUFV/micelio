@@ -11,7 +11,7 @@ const SIM_DTZERO: LazyLock<chrono::DateTime<chrono::Utc>> = LazyLock::new(|| {
     let t = env_t
         .as_ref()
         .map(|s| s.as_str())
-        .unwrap_or("2026-01-01T00:00:00.0Z");
+        .unwrap_or("2025-01-01T00:00:00.0Z");
     chrono::DateTime::parse_from_rfc3339(t)
         .expect("date time should be properly set")
         .to_utc()
@@ -28,7 +28,7 @@ pub fn now() -> Duration {
     Duration::from_secs_f64(t)
 }
 
-/// Current simulation virtual time, plus the elapse real time since the
+/// Current simulation virtual time, plus the elapsed real time since the
 /// beginning of the current async execution.
 pub fn now_delta() -> Duration {
     now() + elapsed()

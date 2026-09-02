@@ -40,7 +40,6 @@ impl CoapTcpServer {
         while let Ok((mut stream, peer)) = listener.accept().await {
             let handler = handler.clone();
             nsrs::spawn(async move {
-                let t0 = nsrs::time::now_delta();
                 let Ok(_) = stream.recv_all(&mut len_buf).await else {
                     nsrs::log!("[CoapTcpServer] failed to get total message size");
                     return;
@@ -63,16 +62,12 @@ impl CoapTcpServer {
                 let request = Box::new(CoapRequest::from_packet(packet, stream.into()));
                 let request = handler(request).await;
                 let Some(response) = request.response else {
-                    nsrs::log!(
-                        "[metrics/CoapTcpServer][peer={peer}] latency (s): {}",
-                        (nsrs::time::now_delta() - t0).as_secs_f64()
-                    );
                     return;
                 };
 
                 if let Some(Connection(stream)) = request.source {
                     let mut stream = stream.lock().await;
-                    let data = match response.message.to_bytes() {
+                    let data = match response.message.to_bytes_unlimited() {
                         Ok(payload) => payload,
                         Err(e) => {
                             nsrs::log!("[CoapTcpServer] failed to reply to {peer:?}: {e}");
@@ -99,12 +94,7 @@ impl CoapTcpServer {
                     // unwrap_or_return!(stream; stream.close(); |e| {
                     //     nsrs::log!("[CoapTcpServer] failed to close conn with {addr:?}: {e}");
                     // });
-                    nsrs::log!("[metrics/CoapTcpServer][peer={peer}] sent bytes: {data_size}");
                 }
-                nsrs::log!(
-                    "[metrics/CoapTcpServer][peer={peer}] latency (s): {}",
-                    (nsrs::time::now_delta() - t0).as_secs_f64()
-                );
             });
         }
     }

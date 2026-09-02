@@ -45,15 +45,26 @@ EdgeApp::~EdgeApp() { NS_LOG_FUNCTION(this); }
 
 void EdgeApp::StartApplication() {
     NS_LOG_FUNCTION(this);
-    micelio::EdgeApp::spawn(*this->sim_params, this->params);
+    switch (this->appOption)
+    {
+    case APP_TRASH:
+        micelio::EdgeApp::spawn_trash(*this->sim_params, this->params);
+        break;
+    case APP_BIKES:
+        micelio::EdgeApp::spawn_bikes(*this->sim_params, this->params);
+        break;
+    default:
+        NS_ASSERT_MSG(false, "invalid app option");
+    }
     nsrs::run();
 }
 
 void EdgeApp::StopApplication() { NS_LOG_FUNCTION(this); }
 
-void EdgeApp::SetParams(micelio::SimulationParams *sim_params, micelio::EdgeAppParams params) {
+void EdgeApp::SetParams(micelio::SimulationParams *sim_params, int appOption, micelio::EdgeAppParams params) {
     this->sim_params = sim_params;
     this->params = params;
+    this->appOption = appOption;
 }
 
 

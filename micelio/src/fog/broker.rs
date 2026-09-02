@@ -20,7 +20,7 @@ use crate::{
 use coap_lite::RequestType as Method;
 use futures::SinkExt;
 use micelio_derive::Namespaced;
-use micelio_rdf::{Name, Namespaced, PrefixMap, RdfType, ToRdf};
+use micelio_rdf::{Name, Namespaced, PrefixMap, RdfTypeRef, ToRdf};
 use oxiri::Iri;
 use std::collections::HashMap;
 use std::error::Error;
@@ -71,7 +71,7 @@ impl FogBroker {
 
     pub async fn acquire_context<C>(&self, ctx: &C) -> Result<(), Box<dyn Error>>
     where
-        C: ToRdf + RdfType + Sync,
+        C: ToRdf + RdfTypeRef + Sync,
     {
         self.kdb
             .acquire_context(ctx, self.iri().as_ref(), &[self.cloud_addr])
@@ -223,7 +223,6 @@ impl FogBroker {
         task: Name,
         request: FinishTaskRequest,
     ) -> Result<(), FogFinishTaskError> {
-        nsrs::log!("[FogBroker] finish task {task}");
         let agg = self
             .get_aggregator(&task)
             .ok_or_else(|| FogFinishTaskError::TaskNotFound(task))?;

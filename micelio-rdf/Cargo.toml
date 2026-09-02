@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-chrono    = "0.4.44"
+chrono    = "0.4.41"
 logos     = "0.16.1"
 oxiri     = "0.2.11"
 oxrdf     = { version = "0.3.0", features = ["oxsdatatypes"] }

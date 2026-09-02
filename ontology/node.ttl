@@ -61,29 +61,24 @@ mcl:Geolocation a owl:Class;
   rdfs:subClassOf tlc:Location;
   .
 
-mcl:NodeGeolocation a owl:Class;
+mcl:Geolocation a owl:Class;
   mcl:visibility mcl:Public;
   rdfs:subClassOf
     mcl:Geolocation,
     [
       a mcl:WithAttribute;
-      mcl:onProperty mcl:x;
+      mcl:onProperty mcl:longitude;
       mcl:onRange xsd:double;
     ],
     [
       a mcl:WithAttribute;
-      mcl:onProperty mcl:y;
-      mcl:onRange xsd:double;
-    ],
-    [
-      a mcl:WithAttribute;
-      mcl:onProperty mcl:z;
+      mcl:onProperty mcl:latitude;
       mcl:onRange xsd:double;
     ],
     [
       a mcl:WithAttribute;
       mcl:onProperty mcl:isLocationOf;
-      mcl:onRange mcl:CcNode;
+      mcl:onRange tlc:Entity;
     ]
   .
 

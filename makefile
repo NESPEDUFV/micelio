@@ -14,11 +14,14 @@ LIB_SRC_FILES := $(shell for f in $$(find micelio micelio-rdf micelio-derive mic
 all: $(BUILD_TARGET)
 
 run: $(BUILD_TARGET)
-	rsync -a --delete data ${NS3_HOME}/
-	cd ${NS3_HOME} && LIBTORCH=${LIBTORCH} LD_LIBRARY_PATH=${LIBTORCH}/lib:${LD_LIBRARY_PATH} PYTORCH_ALLOC_CONF=${PYTORCH_ALLOC_CONF} ./ns3 run ${SIM_NAME}
+	[ -d ${NS3_HOME}/data ] || ln -s $$(realpath data) ${NS3_HOME}/data
+	cd ${NS3_HOME} && LIBTORCH=${LIBTORCH} LD_LIBRARY_PATH=${LIBTORCH}/lib:${LD_LIBRARY_PATH} \
+		PYTORCH_ALLOC_CONF=${PYTORCH_ALLOC_CONF} MICELIO_METRICS=${MICELIO_METRICS} \
+		MICELIO_BASELINE=${MICELIO_BASELINE} ./ns3 run ${SIM_NAME}
 
 configure: 
-	cd ${NS3_HOME} && LIBTORCH=${LIBTORCH} LD_LIBRARY_PATH=${LIBTORCH}/lib:${LD_LIBRARY_PATH} ./ns3 configure --build-profile=${SIM_PROFILE} --with-brite=${BRITE_HOME} --enable-examples
+	cd ${NS3_HOME} && LIBTORCH=${LIBTORCH} LD_LIBRARY_PATH=${LIBTORCH}/lib:${LD_LIBRARY_PATH} \
+		./ns3 configure --build-profile=${SIM_PROFILE} --with-brite=${BRITE_HOME} --enable-examples
 
 $(BUILD_TARGET): $(SIM_SRC_FILES) ${NS3_HOME}/build/lib/libmicelio.a ${JENA_FUSEKI_HOME}/data/.ontology ${NS3_HOME}/src/brite/helper/brite-topology-helper.h ${NS3_HOME}/src/brite/helper/brite-topology-helper.cc
 	mkdir -p ${NS3_HOME}/scratch/${SIM_NAME}
@@ -41,8 +44,12 @@ ${NS3_HOME}/build/lib/libmicelio.a: target/${BUILD_PROFILE}/libmicelio.a
 
 target/${BUILD_PROFILE}/libmicelio.a: $(LIB_SRC_FILES)
 	touch simulation/simulation_brite.cc
+	# rsync -aL --delete target/cxxbridge/rust ${NS3_HOME}/build/include/ || true
+	# rsync -aL --delete target/cxxbridge/nsrs ${NS3_HOME}/build/include/ || true
+	# rsync -aL --delete nsrs/include ${NS3_HOME}/build/include/nsrs || true
+	# rsync -aL --delete target/cxxbridge/micelio-ns3 ${NS3_HOME}/build/include/ || 
+	NS3_HOME=${NS3_HOME} LIBTORCH=${LIBTORCH} RUSTFLAGS=-Zhigher-ranked-assumptions cargo +nightly build ${BUILD_FLAGS}
 	rsync -aL --delete target/cxxbridge/rust ${NS3_HOME}/build/include/
 	rsync -aL --delete target/cxxbridge/nsrs ${NS3_HOME}/build/include/
 	rsync -aL --delete nsrs/include ${NS3_HOME}/build/include/nsrs
 	rsync -aL --delete target/cxxbridge/micelio-ns3 ${NS3_HOME}/build/include/
-	NS3_HOME=${NS3_HOME} LIBTORCH=${LIBTORCH} RUSTFLAGS=-Zhigher-ranked-assumptions cargo +nightly build ${BUILD_FLAGS}

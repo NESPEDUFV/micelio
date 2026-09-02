@@ -30,6 +30,7 @@ pub mod mcl {
     pub const ML_ALGORITHM: NamedNodeRef<'static> = mcl!("MlAlgorithm");
     pub const FL_TASK: NamedNodeRef<'static> = mcl!("LearningTaskLayout");
     pub const DEPENDS_ON: NamedNodeRef<'static> = mcl!("dependsOn");
+    pub const ML_ENTRY: NamedNodeRef<'static> = mcl!("MlEntry");
 }
 
 pub mod task {

@@ -109,19 +109,19 @@ impl Connection {
             let t0 = nsrs::time::now_delta();
             let mut stream = self.0.lock().await;
             let peer = stream.peer_addr();
-            let data = request.message.to_bytes().map_err(io::Error::other)?;
+            let data = request.message.to_bytes_unlimited().map_err(io::Error::other)?;
             let data_size = data.len();
             stream.send_all(&data_size.to_le_bytes()).await?;
             stream.send_all(&data).await?;
             stream.flush().await?;
-            nsrs::log!("[metrics/Connection][peer={peer}] sent bytes: {data_size}");
+            nsrs::metric!("[metrics/Connection][peer={peer}] sent bytes: {data_size}");
             let mut n_buf = [0u8; 8];
             stream.recv_all(&mut n_buf).await?;
             let n = usize::from_le_bytes(n_buf).min(Packet::MAX_SIZE);
             let mut buf = vec![0; n];
             stream.recv_all(&mut buf).await?;
-            nsrs::log!("[metrics/Connection][peer={peer}] received bytes: {n}");
-            nsrs::log!(
+            nsrs::metric!("[metrics/Connection][peer={peer}] received bytes: {n}");
+            nsrs::metric!(
                 "[metrics/Connection][peer={peer}] latency (s): {}",
                 (nsrs::time::now_delta() - t0).as_secs_f64()
             );

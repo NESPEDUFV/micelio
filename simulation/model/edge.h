@@ -8,6 +8,9 @@
 #include "ns3/ptr.h"
 #include "ns3/traced-callback.h"
 
+#define APP_TRASH 1
+#define APP_BIKES 2
+
 namespace ns3 {
 
 class Socket;
@@ -20,7 +23,7 @@ public:
     EdgeApp();
     ~EdgeApp() override;
 
-    void SetParams(micelio::SimulationParams *sim_params, micelio::EdgeAppParams params);
+    void SetParams(micelio::SimulationParams *sim_params, int appOption, micelio::EdgeAppParams params);
 
 private:
     void StartApplication() override;
@@ -28,6 +31,7 @@ private:
 
     micelio::SimulationParams *sim_params;
     micelio::EdgeAppParams params;
+    int appOption;
 
     /// Callbacks for tracing the packet Tx events, includes source and
     /// destination addresses

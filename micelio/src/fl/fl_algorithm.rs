@@ -8,7 +8,7 @@ use crate::fl::utils::{check_weights, weighted_average_on_vec_map};
 use crate::fl::{context::FlContext, nodemap::NodeMap};
 use crate::kdb::KnowledgeDBExt;
 use async_trait::async_trait;
-use micelio_rdf::{GraphDecode, Name, PrefixedName};
+use micelio_rdf::{Name, PrefixedName, RdfType};
 use oxiri::Iri;
 use serde::Deserialize;
 use std::collections::HashSet;
@@ -34,7 +34,7 @@ pub trait FlAlgorithm: Sync + Send + 'static {
     fn create(params: Config) -> Result<Self, Box<dyn Error>>
     where
         Self: Sized;
-    fn depends_on(&self) -> HashSet<Iri<&'static str>>;
+    fn depends_on<'a>(&'a self) -> HashSet<Iri<&'a str>>;
     #[cfg(feature = "cloud")]
     async fn hit_stop_condition(&self, ctx: &mut FlContext) -> FlResult<bool>;
     #[cfg(feature = "cloud")]
@@ -106,6 +106,7 @@ pub struct DefaultFedAvg {
     pub min_clients_per_aggregator: usize,
     pub clients_frac: f64,
     pub max_workload: Option<f64>,
+    pub reference_metric: Iri<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -117,6 +118,7 @@ pub struct DefaultFedAvgParams {
     pub min_clients_per_aggregator: Option<usize>,
     pub clients_frac: Option<f64>,
     pub max_workload: Option<f64>,
+    pub reference_metric: Option<Iri<String>>,
 }
 
 impl DefaultFedAvg {
@@ -129,6 +131,9 @@ impl DefaultFedAvg {
             min_clients_per_aggregator: params.min_clients_per_aggregator.unwrap_or(1).max(1),
             clients_frac: params.clients_frac.unwrap_or(1.0).clamp(0.0, 1.0),
             max_workload: params.max_workload,
+            reference_metric: params
+                .reference_metric
+                .unwrap_or_else(|| Accuracy::rdf_type().into()),
         }
     }
 }
@@ -143,10 +148,11 @@ impl FlAlgorithm for DefaultFedAvg {
         Ok(DefaultFedAvg::new(params.deserialized()?))
     }
 
-    fn depends_on(&self) -> HashSet<Iri<&'static str>> {
+    fn depends_on<'a>(&'a self) -> HashSet<Iri<&'a str>> {
         HashSet::from([
-            Iri::parse_unchecked("http://nesped1.caf.ufv.br/micelio/ontology#NodeGeolocation"),
+            Iri::parse_unchecked("http://nesped1.caf.ufv.br/micelio/ontology#Geolocation"),
             Iri::parse_unchecked("http://nesped1.caf.ufv.br/micelio/ontology#DatasetSize"),
+            self.reference_metric.as_ref(),
         ])
     }
 
@@ -161,8 +167,10 @@ impl FlAlgorithm for DefaultFedAvg {
         ctx: &mut FlContext,
         clients: &[Name],
     ) -> Result<NodeMap, FlNodeMapError> {
-        use crate::{fl::nodemap::AggInfo, vocab::mcl};
-        use kdtree::{KdTree, distance::squared_euclidean};
+        use crate::fl::nodemap::AggInfo;
+        use crate::fl::utils::haversine;
+        use crate::vocab::mcl;
+        use kdtree::KdTree;
         use micelio_derive::FromRdf;
         use micelio_rdf::GraphDecode;
         use oxrdf::vocab::rdf;
@@ -188,6 +196,13 @@ impl FlAlgorithm for DefaultFedAvg {
             location: [f64; 2],
         }
 
+        if clients.len() < self.min_clients {
+            return Err(FlNodeMapError::NotEnoughClients {
+                expected: self.min_clients,
+                got: clients.len(),
+            });
+        }
+
         let clients_values = itertools::join(clients, " ");
         let prefixes = ctx.kdb.prefixes();
         let header = prefixes.sparql_header();
@@ -196,20 +211,25 @@ impl FlAlgorithm for DefaultFedAvg {
 CONSTRUCT {{
     ?node a ?cls;
         mcl:hasInternetAddress ?addr;
-        mcl:locatedAt ( ?x ?y ).
+        mcl:locatedAt ( ?lng ?lat ).
 }}
 WHERE {{
     {{
         ?node a mcl:FogNode;
-            mcl:hasInternetAddress ?addr; mcl:locatedAt [ mcl:x ?x; mcl:y ?y ].
+            mcl:hasInternetAddress ?addr;
         BIND(mcl:FogNode AS ?cls)
     }}
     UNION {{
         VALUES ?node {{ {clients_values} }}
-        ?node a mcl:EdgeNode;
-            mcl:locatedAt [ mcl:x ?x; mcl:y ?y ].
+        ?node a mcl:EdgeNode.
         BIND(mcl:EdgeNode AS ?cls)
     }}
+    ?loc a mcl:Geolocation;
+        mcl:isLocationOf ?node;
+        mcl:latitude ?lat;
+        mcl:longitude ?lng;
+        .
+
 }}"
         );
         let graph = ctx
@@ -234,21 +254,26 @@ WHERE {{
         if client_nodes.len() < self.min_clients {
             return Err(FlNodeMapError::NotEnoughClients {
                 expected: self.min_clients,
-                got: agg_nodes.len(),
+                got: client_nodes.len(),
             });
         }
 
         let mut nearest_clients: HashMap<Iri<String>, Vec<Iri<String>>> = {
             let mut tree = KdTree::new(2);
             for node in agg_nodes.iter() {
-                tree.add(&node.location, &node.iri)
+                let [lng, lat] = &node.location;
+                tree.add([lng.to_radians(), lat.to_radians()], &node.iri)
                     .map_err(FlNodeMapError::other)?;
             }
 
             let mut map = HashMap::<&Iri<String>, Vec<Iri<String>>>::new();
             for client in client_nodes {
+                let client_loc = [
+                    client.location[0].to_radians(),
+                    client.location[1].to_radians(),
+                ];
                 let nearests = tree
-                    .nearest(&client.location, 1, &squared_euclidean)
+                    .nearest(&client_loc, 1, &haversine)
                     .map_err(FlNodeMapError::other)?;
                 let (_, nearest) = nearests
                     .first()
@@ -259,8 +284,6 @@ WHERE {{
                 .map(|(iri, clients)| (iri.clone(), clients))
                 .collect()
         };
-
-        nsrs::log!("[DefaultFedAvg] {nearest_clients:#?}");
 
         agg_nodes
             .into_iter()
@@ -307,7 +330,7 @@ WHERE {{
 SELECT ?node ?count
 WHERE {{
     VALUES ?node {{ {nodes_values} }}
-    [] a mcl:DatasetSize;
+    ?ds a mcl:DatasetSize;
         mcl:acquiredBy ?node;
         mcl:forTask {task_name};
         rdf:value ?count.
@@ -323,14 +346,21 @@ WHERE {{
         let mut rng = rand::rng();
         let amount = ((nodes.len() as f64 * self.clients_frac) as usize)
             .max(self.min_clients_per_aggregator);
-        let selected = nodes
+        let selected: Vec<_> = nodes
             .sample_weighted(&mut rng, amount, |key| {
                 node_utility.get(key).copied().unwrap_or(0) as f64
             })
             .map_err(FlSelectTrainError::other)?
             .cloned()
             .collect();
-        Ok(selected)
+        if selected.len() >= self.min_clients_per_aggregator {
+            Ok(selected)
+        } else {
+            Err(FlSelectTrainError::NotEnoughClientsPerAgg {
+                expected: self.min_clients_per_aggregator,
+                got: selected.len(),
+            })
+        }
     }
 
     async fn aggregate_train(
@@ -354,18 +384,18 @@ SELECT ?node (SUM(?ds) AS ?count)
 WHERE {{
     VALUES ?node {{ {nodes_values} }}
     {{
-        [] a mcl:DatasetSize;
+        ?_ds a mcl:DatasetSize;
             mcl:acquiredBy ?node;
             mcl:forTask {task_name};
             rdf:value ?ds.
     }} UNION {{
-        [] a mcl:Aggregation;
+        ?_agg a mcl:Aggregation;
             mcl:forTask {task_name};
             mcl:forRound {round};
             mcl:acquiredBy ?node;
             mcl:onNode ?srcNode.
         
-        [] a mcl:DatasetSize;
+        ?_ds a mcl:DatasetSize;
             mcl:acquiredBy ?srcNode;
             mcl:forTask {task_name};
             rdf:value ?ds.
@@ -400,8 +430,7 @@ GROUP BY ?node"
                 ctx.round(),
                 from_node,
                 ws,
-            ))
-            .await?;
+            ))?;
         }
         Ok(weighted_average_on_vec_map(w_info, weights, &counts))
     }
@@ -498,13 +527,13 @@ WHERE {{
         SELECT ?node (SUM(?size) AS ?totalSize)
         WHERE {{
             VALUES ?node {{ {nodes_values} }}
-            [] a mcl:Aggregation;
+            ?_agg a mcl:Aggregation;
                 mcl:forTask {task_name};
                 mcl:forRound {round};
                 mcl:acquiredBy ?node;
                 mcl:onNode ?srcNode.
             
-            [] a mcl:ModelWeightsUpdate;
+            ?_up a mcl:ModelWeightsUpdate;
                 mcl:forTask {task_name};
                 mcl:forRound {round};
                 mcl:acquiredBy ?node;
@@ -545,50 +574,68 @@ WHERE {{
         ctx: &mut FlContext,
         _nodes: &[&Iri<String>],
     ) -> Result<(), FlAggEvalError> {
+        use micelio_derive::{FromRdf, ToRdf};
+
+        #[derive(Debug, FromRdf, ToRdf)]
+        #[prefix(mcl:"http://nesped1.caf.ufv.br/micelio/ontology#")]
+        #[prefix(rdf:"http://www.w3.org/1999/02/22-rdf-syntax-ns#")]
+        struct ReferenceMetric<'a> {
+            #[rdftype]
+            cls: Iri<&'a str>,
+            #[predicate(mcl:forTask)]
+            for_task: Iri<String>,
+            #[predicate(mcl:forRound)]
+            for_round: u64,
+            #[predicate(rdf:value)]
+            value: f64,
+        }
+
         let prefixes = ctx.kdb.prefixes();
         let task_name = prefixes.unresolve(ctx.task_iri().as_ref());
         let round = ctx.round();
         let header = prefixes.sparql_header();
+        let metric_name = prefixes.unresolve(self.reference_metric.as_ref());
         let query = format!(
             "{header}
-CONSTRUCT {{
-    [] a mcl:Accuracy;
-        mcl:forTask {task_name};
-        mcl:forRound {round};
-        rdf:value ?globalAcc.
-}}
+SELECT ?global
 WHERE {{
-    SELECT (SUM(?acc * ?ds) / SUM(?ds) AS ?globalAcc)
+    SELECT (SUM(?v * ?ds) / SUM(?ds) AS ?global)
     WHERE {{
         ?node a mcl:EdgeNode.
-        [] a mcl:DatasetSize;
+        ?_ds a mcl:DatasetSize;
             mcl:forTask {task_name};
             mcl:acquiredBy ?node;
             rdf:value ?ds.
-        [] a mcl:Accuracy;
+        ?_metric a {metric_name};
             mcl:forTask {task_name};
             mcl:forRound {round};
             mcl:acquiredBy ?node;
-            rdf:value ?acc.
+            rdf:value ?v.
+        FILTER(?v = ?v)
     }}
 }}"
         );
-        let graph = ctx
+        let (value,) = ctx
             .kdb
-            .construct(&query)
+            .select_deser::<(f64,)>(&query)
             .await
-            .map_err(FlAggEvalError::FailedQuery)?;
-        let acc = graph
-            .decode_instances::<Accuracy>()
+            .map_err(FlAggEvalError::FailedQuery)?
             .next()
-            .expect("construct guarantees instance")
+            .ok_or_else(|| FlAggEvalError::FailedDecode(format!("no {metric_name} instance")))?
             .map_err(|e| FlAggEvalError::FailedDecode(e.to_string()))?;
+        let metric = ReferenceMetric {
+            cls: self.reference_metric.as_ref(),
+            for_task: ctx.task_iri().clone(),
+            for_round: ctx.round(),
+            value,
+        };
         nsrs::log!(
-            "[FlAlgorithm] round #{} global accuracy: {}",
+            "[FlAlgorithm][{}][round #{}] global metric: {}",
+            ctx.task_layout_name(),
             ctx.round(),
-            acc.value
+            value
         );
-        ctx.acquire_context(&acc).await?;
+        ctx.acquire_context(&metric)?;
         Ok(())
     }
 }

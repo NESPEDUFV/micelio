@@ -1,6 +1,5 @@
 use super::KnowledgeDB;
 use async_trait::async_trait;
-use logos::{Lexer, Logos};
 use micelio_derive::Namespaced;
 use micelio_rdf::{GraphEncode, Namespaced, PrefixMap};
 use oxiri::Iri;
@@ -12,6 +11,7 @@ use reqwest::{Client, ClientBuilder, RequestBuilder};
 use sparesults::{
     QueryResultsFormat, QueryResultsParser, QuerySolution, SliceQueryResultsParserOutput,
 };
+use std::any::Any;
 use std::collections::HashMap;
 use std::error::Error;
 
@@ -77,7 +77,7 @@ impl KnowledgeDB for JenaFusekiKdb {
         query: &str,
     ) -> Result<(Vec<Variable>, Vec<QuerySolution>), Box<dyn Error>> {
         let mut form = HashMap::new();
-        form.insert("query", as_compact(query));
+        form.insert("query", query);
         let request = self
             .client
             .post(self.endpoint("query"))
@@ -116,7 +116,7 @@ impl KnowledgeDB for JenaFusekiKdb {
 
     async fn construct(&self, query: &str) -> Result<Graph, Box<dyn Error>> {
         let mut form = HashMap::new();
-        form.insert("query", as_compact(query));
+        form.insert("query", query);
         let request = self
             .client
             .post(self.endpoint("query"))
@@ -149,7 +149,7 @@ impl KnowledgeDB for JenaFusekiKdb {
 
     async fn ask(&self, query: &str) -> Result<bool, Box<dyn Error>> {
         let mut form = HashMap::new();
-        form.insert("query", as_compact(query));
+        form.insert("query", query);
         let request = self
             .client
             .post(self.endpoint("query"))
@@ -182,7 +182,7 @@ impl KnowledgeDB for JenaFusekiKdb {
 
     async fn update(&self, query: &str) -> Result<(), Box<dyn Error>> {
         let mut form = HashMap::new();
-        form.insert("update", as_compact(query));
+        form.insert("update", query);
         let request = self.client.post(self.endpoint("update")).form(&form);
         let request = self.use_graph(request, "using-graph-uri");
         let response = request.send();
@@ -230,24 +230,8 @@ impl KnowledgeDB for JenaFusekiKdb {
 
         Ok(())
     }
-}
 
-#[derive(Debug, Clone, Copy, Logos)]
-enum WsToken {
-    #[regex(r"\S+")]
-    NonWs,
-    #[regex(r"\s+")]
-    Ws,
-}
-
-fn as_compact(s: &str) -> String {
-    let mut lexer = Lexer::<WsToken>::new(s.trim());
-    let mut compact = String::with_capacity((s.len() as f64 * 0.9) as usize);
-    while let Some(token) = lexer.next() {
-        match token.expect("should never fail to match") {
-            WsToken::Ws => compact.push_str(" "),
-            WsToken::NonWs => compact.push_str(lexer.slice()),
-        }
+    fn as_any(&self) -> &dyn Any {
+        self
     }
-    compact
 }

@@ -14,11 +14,12 @@ use coap_lite::RequestType as Method;
 pub use global::GlobalKdb;
 pub use jena::JenaFusekiKdb;
 pub use local::LocalKdb;
-use micelio_rdf::{GraphEncode, Namespaced, RdfType, ToRdf};
+use micelio_rdf::{GraphEncode, Namespaced, RdfTypeRef, ToRdf};
 use oxiri::Iri;
 use oxrdf::{BlankNode, Graph, Term, Variable};
 use serde::de::{self, DeserializeOwned, IntoDeserializer, Visitor};
 use sparesults::QuerySolution;
+use std::any::Any;
 use std::{error::Error, net::SocketAddr, sync::Arc};
 
 #[async_trait]
@@ -32,16 +33,57 @@ pub trait KnowledgeDB: Namespaced + Sync + Send + 'static {
     async fn update(&self, query: &str) -> Result<(), Box<dyn Error>>;
     async fn insert(&self, data: Graph) -> Result<(), Box<dyn Error>>;
     async fn insert_ttl(&self, data: Vec<u8>) -> Result<(), Box<dyn Error>>;
+    fn as_any(&self) -> &dyn Any;
+}
+
+pub trait SyncKnowledgeDB: Namespaced {
+    fn sync_select(
+        &self,
+        query: &str,
+    ) -> Result<(Vec<Variable>, Vec<QuerySolution>), Box<dyn Error>>;
+    fn sync_construct(&self, query: &str) -> Result<Graph, Box<dyn Error>>;
+    fn sync_ask(&self, query: &str) -> Result<bool, Box<dyn Error>>;
+    fn sync_update(&self, query: &str) -> Result<(), Box<dyn Error>>;
+    fn sync_insert(&self, data: Graph) -> Result<(), Box<dyn Error>>;
+    fn sync_insert_ttl(&self, data: Vec<u8>) -> Result<(), Box<dyn Error>>;
+}
+
+#[async_trait]
+impl<T: SyncKnowledgeDB + Namespaced + Sync + Send + 'static> KnowledgeDB for T {
+    async fn select(
+        &self,
+        query: &str,
+    ) -> Result<(Vec<Variable>, Vec<QuerySolution>), Box<dyn Error>> {
+        self.sync_select(query)
+    }
+    async fn construct(&self, query: &str) -> Result<Graph, Box<dyn Error>> {
+        self.sync_construct(query)
+    }
+    async fn ask(&self, query: &str) -> Result<bool, Box<dyn Error>> {
+        self.sync_ask(query)
+    }
+    async fn update(&self, query: &str) -> Result<(), Box<dyn Error>> {
+        self.sync_update(query)
+    }
+    async fn insert(&self, data: Graph) -> Result<(), Box<dyn Error>> {
+        self.sync_insert(data)
+    }
+    async fn insert_ttl(&self, data: Vec<u8>) -> Result<(), Box<dyn Error>> {
+        self.sync_insert_ttl(data)
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
 #[async_trait]
 pub trait KnowledgeDBExt: KnowledgeDB {
-    async fn is_context_public<C>(&self) -> Result<bool, Box<dyn Error>>
+    async fn is_context_public<C>(&self, ctx: &C) -> Result<bool, Box<dyn Error>>
     where
-        C: RdfType,
+        C: RdfTypeRef + Sync,
     {
         let prefixes = self.prefixes();
-        let ctx_cls = prefixes.unresolve(C::rdf_type());
+        let ctx_cls = prefixes.unresolve(ctx.rdf_type_ref());
         let header = prefixes.sparql_header();
         let query = format!("{header} ASK WHERE {{ {ctx_cls} mcl:visibility mcl:Public }}");
         self.ask(&query).await
@@ -59,11 +101,37 @@ pub trait KnowledgeDBExt: KnowledgeDB {
     }
 }
 
+pub trait SyncKnowledgeDBExt: SyncKnowledgeDB {
+    fn sync_is_context_public<C>(&self, ctx: &C) -> Result<bool, Box<dyn Error>>
+    where
+        C: RdfTypeRef,
+    {
+        let prefixes = self.prefixes();
+        let ctx_cls = prefixes.unresolve(ctx.rdf_type_ref());
+        let header = prefixes.sparql_header();
+        let query = format!("{header} ASK WHERE {{ {ctx_cls} mcl:visibility mcl:Public }}");
+        self.sync_ask(&query)
+    }
+
+    fn sync_select_deser<T>(
+        &self,
+        query: &str,
+    ) -> Result<impl Iterator<Item = Result<T, de::value::Error>>, Box<dyn Error>>
+    where
+        T: DeserializeOwned,
+    {
+        let (_, solutions) = self.sync_select(query)?;
+        Ok(solutions.into_iter().map(|s| deserialize_solution::<T>(&s)))
+    }
+}
+
 #[async_trait]
 impl KnowledgeDBExt for dyn KnowledgeDB {}
+impl SyncKnowledgeDBExt for dyn SyncKnowledgeDB {}
 
 #[async_trait]
 impl<T: KnowledgeDB> KnowledgeDBExt for T {}
+impl<T: SyncKnowledgeDB> SyncKnowledgeDBExt for T {}
 
 #[async_trait]
 pub(crate) trait InternalKnowledgeDBExt: KnowledgeDB + KnowledgeDBExt {
@@ -112,7 +180,7 @@ WHERE {{
         pub_addrs: &[SocketAddr],
     ) -> Result<(), Box<dyn Error>>
     where
-        C: ToRdf + RdfType + Sync,
+        C: ToRdf + RdfTypeRef + Sync,
     {
         let graph = {
             let mut graph = Graph::new();
@@ -124,7 +192,7 @@ WHERE {{
             metadata.into_rdf_triples(&mut graph, subject.as_ref());
             graph
         };
-        if !pub_addrs.is_empty() && self.is_context_public::<C>().await? {
+        if !pub_addrs.is_empty() && self.is_context_public(ctx).await? {
             self.publish_context(&graph, pub_addrs).await?;
         }
         self.insert(graph).await
@@ -164,21 +232,30 @@ pub struct ContextBuffer {
 }
 
 impl ContextBuffer {
-    pub async fn acquire<C>(&mut self, ctx: &C) -> std::io::Result<()>
+    pub fn kdb(&self) -> &dyn KnowledgeDB {
+        self.kdb.as_ref()
+    }
+
+    pub fn node_iri(&self) -> Iri<&str> {
+        self.node_iri.as_ref()
+    }
+
+    pub fn acquire<C>(&mut self, ctx: &C) -> std::io::Result<()>
     where
-        C: ToRdf + RdfType,
+        C: ToRdf + RdfTypeRef,
     {
         let [internal_g, external_g] = &mut self.graphs;
         let subject = BlankNode::default();
         let metadata = ContextMetadata::new(self.node_iri.as_ref());
         let graphs = match self.layer {
             CcLayer::Edge => {
-                if self
-                    .kdb
-                    .is_context_public::<C>()
-                    .await
-                    .map_err(|e| std::io::Error::other(e.to_string()))?
-                {
+                let is_public = if let Some(kdb) = self.kdb.as_any().downcast_ref::<LocalKdb>() {
+                    kdb.sync_is_context_public(ctx)
+                        .map_err(|e| std::io::Error::other(e.to_string()))?
+                } else {
+                    false
+                };
+                if is_public {
                     vec![external_g, internal_g]
                 } else {
                     vec![internal_g]
@@ -206,17 +283,19 @@ impl ContextBuffer {
         }
         if !external_g.is_empty() {
             let prefixes = Some(self.kdb.prefixes());
-            let payload = external_g.dump_ttl(prefixes)?;
-            for (pub_addr, payload) in self
+            let payloads = external_g.dump_ttls(prefixes)?;
+            for (pub_addr, payloads) in self
                 .pub_addrs
                 .iter()
                 .copied()
-                .zip(itertools::repeat_n(payload, self.pub_addrs.len()))
+                .zip(itertools::repeat_n(payloads, self.pub_addrs.len()))
             {
-                let conn = Connection::to(pub_addr).await?;
-                conn.send_raw::<()>(Method::Post, "context", payload, None)
-                    .await?;
-                conn.close().await?;
+                for payload in payloads {
+                    let conn = Connection::to(pub_addr).await?;
+                    conn.send_raw::<()>(Method::Post, "context", payload, None)
+                        .await?;
+                    conn.close().await?;
+                }
             }
         }
         Ok(())

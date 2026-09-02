@@ -5,6 +5,7 @@ pub mod time;
 
 use std::{
     ops::{Deref, DerefMut},
+    sync::LazyLock,
     time::Duration,
 };
 
@@ -195,12 +196,18 @@ impl<T, E> Joined<Result<T, E>> {
             match result {
                 Some(Ok(_)) => {}
                 Some(Err(e)) => return Err(e),
-                None => return Err(timed_out())
+                None => return Err(timed_out()),
             }
         }
         Ok(())
     }
 }
+
+pub static METRIC_MODE: LazyLock<bool> = LazyLock::new(|| {
+    std::env::var("MICELIO_METRICS")
+        .map(|v| v == "1")
+        .unwrap_or_default()
+});
 
 #[macro_export]
 macro_rules! log {
@@ -208,5 +215,16 @@ macro_rules! log {
         let now = $crate::time::datetime_now();
         let node = $crate::context();
         println!("[{:3}][{:12}] {}", node, now, format!($($arg)*));
+    }};
+}
+
+#[macro_export]
+macro_rules! metric {
+    ($($arg:tt)*) => {{
+        if *$crate::METRIC_MODE {
+            let now = $crate::time::datetime_now();
+            let node = $crate::context();
+            println!("[{:3}][{:12}] {}", node, now, format!($($arg)*));
+        }
     }};
 }

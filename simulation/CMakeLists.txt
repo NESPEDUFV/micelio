@@ -25,6 +25,7 @@ build_exec(
                     ${libcsma}
                     ${libinternet-apps}
                     ${libinternet}
+                    ${libnix-vector-routing}
                     ${liblte}
                     ${libmobility}
                     ${libpoint-to-point}

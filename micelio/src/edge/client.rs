@@ -2,18 +2,20 @@ use crate::coap::{CoapRequestExt, CoapResult, CoapTcpPush, deser_payload, routes
 use crate::dto::EdgeStartTaskRequest;
 use crate::edge::fl_client::FlClient;
 use crate::edge::ml_registry::MlRegistry;
-use crate::error::EdgeStartTaskError;
+use crate::error::{EdgeStartTaskError, NameError};
 use crate::fl::context::CcLayer;
 use crate::fl::ml_algorithm::{DefaultMlCatalog, MlCatalog};
-use crate::kdb::{ContextBuffer, InternalKnowledgeDBExt, KnowledgeDB};
+use crate::kdb::{ContextBuffer, InternalKnowledgeDBExt, JenaFusekiKdb, LocalKdb};
 use crate::{
     Connection,
     dto::{EdgeSignupRequest, SignupResponse},
 };
 use coap_lite::RequestType as Method;
 use micelio_derive::Namespaced;
-use micelio_rdf::{Name, Namespaced, PrefixMap, RdfType, ToRdf};
+use micelio_rdf::{Name, Namespaced, PrefixMap, RdfTypeRef, ToRdf};
+use oxigraph::sparql::AggregateFunctionAccumulator;
 use oxiri::Iri;
+use oxrdf::{NamedNode, Term};
 use std::collections::HashSet;
 use std::error::Error;
 use std::sync::Mutex;
@@ -26,7 +28,7 @@ use std::{
 
 pub struct EdgeClient {
     pub(crate) node_iri: Iri<String>,
-    pub(crate) kdb: Arc<dyn KnowledgeDB>,
+    pub(crate) kdb: Arc<LocalKdb>,
     pub(crate) ml_registry: Arc<MlRegistry>,
     pub(crate) cloud_addr: SocketAddr,
     pub(crate) fog_addrs: Arc<Mutex<HashSet<SocketAddr>>>,
@@ -41,6 +43,8 @@ impl EdgeClient {
             store_path: Default::default(),
             prefixes: Default::default(),
             ml_catalog: Box::new(DefaultMlCatalog),
+            functions: Default::default(),
+            agg_functions: Default::default(),
         }
         .initialized_namespace()
     }
@@ -51,6 +55,10 @@ impl EdgeClient {
 
     pub fn name(&self) -> Name {
         self.kdb.prefixes().unresolve(self.iri())
+    }
+
+    pub fn kdb(&self) -> &LocalKdb {
+        &self.kdb
     }
 
     fn pub_addrs(&self) -> Vec<SocketAddr> {
@@ -67,7 +75,7 @@ impl EdgeClient {
 
     pub async fn acquire_context<C>(&self, ctx: &C) -> Result<(), Box<dyn Error>>
     where
-        C: ToRdf + RdfType + Sync,
+        C: ToRdf + RdfTypeRef + Sync,
     {
         let addrs = self.pub_addrs();
         self.kdb
@@ -83,6 +91,37 @@ impl EdgeClient {
             pub_addrs: self.pub_addrs(),
             graphs: Default::default(),
         }
+    }
+
+    pub fn mock_acquisition(&self) -> (ContextBuffer, ContextBuffer) {
+        let local = ContextBuffer {
+            layer: CcLayer::Cloud,
+            kdb: self.kdb.clone(),
+            node_iri: self.node_iri.clone(),
+            pub_addrs: vec![],
+            graphs: Default::default(),
+        };
+        let jena = Arc::new(
+            Box::new(JenaFusekiKdb::new("http://localhost:3030"))
+                .expect("should init jena kdb")
+                .with_prefix_u("sim", "http://nesped1.caf.ufv.br/micelio/simulation#")
+                .with_prefix_u(
+                    "trash",
+                    "http://nesped1.caf.ufv.br/micelio/simulation/trash#",
+                )
+                .with_prefix_u(
+                    "bikes",
+                    "http://nesped1.caf.ufv.br/micelio/simulation/bikes#",
+                ),
+        );
+        let global = ContextBuffer {
+            layer: CcLayer::Cloud,
+            kdb: jena,
+            node_iri: self.node_iri.clone(),
+            pub_addrs: vec![],
+            graphs: Default::default(),
+        };
+        (local, global)
     }
 
     pub(crate) async fn signup(&self, acquires: Vec<Name>) -> Result<(), Box<dyn Error>> {
@@ -154,6 +193,19 @@ pub struct ClientBuilder<A> {
     acquires: Vec<Name>,
     store_path: Option<PathBuf>,
     ml_catalog: Box<dyn MlCatalog>,
+    functions: Vec<(
+        NamedNode,
+        &'static (dyn Fn(&[Term]) -> Option<Term> + Send + Sync + 'static),
+    )>,
+    agg_functions: Vec<(
+        NamedNode,
+        &'static (
+                     dyn Fn() -> Box<dyn AggregateFunctionAccumulator + Send + Sync>
+                         + Send
+                         + Sync
+                         + 'static
+                 ),
+    )>,
 }
 
 impl<A: ToSocketAddrs> ClientBuilder<A> {
@@ -162,8 +214,8 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
         self
     }
 
-    pub fn acquiring_many(mut self, classes: impl Iterator<Item = impl Into<Name>>) -> Self {
-        for cls in classes {
+    pub fn acquiring_many(mut self, classes: impl IntoIterator<Item = impl Into<Name>>) -> Self {
+        for cls in classes.into_iter() {
             self.add_acquiring(cls);
         }
         self
@@ -178,6 +230,7 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
             .unwrap_or(cls);
         self.acquires.push(cls);
     }
+
     pub fn with_name(mut self, node_name: impl Into<Name>) -> Self {
         self.set_name(node_name);
         self
@@ -205,26 +258,82 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
         self.ml_catalog = Box::new(ml_catalog);
     }
 
+    pub fn add_sparql_function(
+        &mut self,
+        name: impl Into<Name>,
+        evaluator: &'static (dyn Fn(&[Term]) -> Option<Term> + Send + Sync + 'static),
+    ) -> Result<(), NameError> {
+        let name = name.into();
+        let name = self
+            .prefixes
+            .resolve(&name)
+            .ok_or_else(|| NameError(name))?;
+        self.functions.push((name.into(), evaluator));
+        Ok(())
+    }
+
+    pub fn with_sparql_function(
+        mut self,
+        name: impl Into<Name>,
+        evaluator: &'static (dyn Fn(&[Term]) -> Option<Term> + Send + Sync + 'static),
+    ) -> Result<Self, NameError> {
+        self.add_sparql_function(name, evaluator)?;
+        Ok(self)
+    }
+
+    pub fn add_sparql_agg_function(
+        &mut self,
+        name: impl Into<Name>,
+        evaluator: &'static (
+                     dyn Fn() -> Box<dyn AggregateFunctionAccumulator + Send + Sync>
+                         + Send
+                         + Sync
+                         + 'static
+                 ),
+    ) -> Result<(), NameError> {
+        let name = name.into();
+        let name = self
+            .prefixes
+            .resolve(&name)
+            .ok_or_else(|| NameError(name))?;
+        self.agg_functions.push((name.into(), evaluator));
+        Ok(())
+    }
+
+    pub fn with_sparql_agg_function(
+        mut self,
+        name: impl Into<Name>,
+        evaluator: &'static (
+                     dyn Fn() -> Box<dyn AggregateFunctionAccumulator + Send + Sync>
+                         + Send
+                         + Sync
+                         + 'static
+                 ),
+    ) -> Result<Self, NameError> {
+        self.add_sparql_agg_function(name, evaluator)?;
+        Ok(self)
+    }
+
     pub async fn init(self) -> Result<EdgeClient, Box<dyn Error>> {
         let node_name = match self.node_name {
             Some(name) => name,
             None => std::env::var("NODE_IRI")?.parse()?,
         };
-        let node_iri = self
-            .prefixes
-            .resolve(&node_name)
-            .ok_or_else(|| io::Error::other("unknown prefix"))?;
-        let kdb: Arc<dyn KnowledgeDB> = if std::option_env!("LOCALKDB_AS_JENA")
-            .unwrap_or("")
-            .is_empty()
-        {
-            Arc::new(crate::kdb::LocalKdb::new()?.with_namespace(self.prefixes))
-        } else {
-            Arc::new(
-                crate::kdb::JenaFusekiKdb::new("http://localhost:3030")?
-                    .with_graph(node_iri.clone())
-                    .with_namespace(self.prefixes),
-            )
+        let node_iri = self.prefixes.resolve(&node_name).ok_or_else(|| {
+            io::Error::other(format!(
+                "unknown prefix. Name: {node_name:?}. All prefixes: {:?}",
+                self.prefixes
+            ))
+        })?;
+        let kdb = {
+            let mut kdb = crate::kdb::LocalKdb::new()?.with_namespace(self.prefixes);
+            for (name, func) in self.functions {
+                kdb.add_custom_function(name, func);
+            }
+            for (name, func) in self.agg_functions {
+                kdb.add_custom_agg_function(name, func);
+            }
+            Arc::new(kdb)
         };
         let ml_catalog = self.ml_catalog;
         let cloud_addr = self
@@ -234,16 +343,13 @@ impl<A: ToSocketAddrs> ClientBuilder<A> {
             .next()
             .ok_or_else(|| io::Error::other("expected an address"))?;
         let fog_addrs: Arc<Mutex<_>> = Default::default();
-        let ml_registry = Arc::new(
-            MlRegistry::new(
-                kdb.clone(),
-                node_iri.clone(),
-                cloud_addr,
-                fog_addrs.clone(),
-                ml_catalog,
-            )
-            .await?,
-        );
+        let ml_registry = Arc::new(MlRegistry::new(
+            kdb.clone(),
+            node_iri.clone(),
+            cloud_addr,
+            fog_addrs.clone(),
+            ml_catalog,
+        )?);
         let client = EdgeClient {
             node_iri,
             kdb,

@@ -3,6 +3,7 @@ use crate::{
     error::FlAggTrainError,
     fl::FlContext,
 };
+use num_traits::Float;
 use oxiri::Iri;
 use std::collections::{HashMap, HashSet};
 
@@ -114,7 +115,7 @@ fn inner_weighted_average_on_vecs(vecs: &[&[f32]], ws: &[f32], len: usize, total
     result
 }
 
-pub(crate) async fn acquire_aggregation(
+pub(crate) fn acquire_aggregation(
     ctx: &mut FlContext,
     nodes: &[&Iri<String>],
 ) -> std::io::Result<()> {
@@ -124,7 +125,22 @@ pub(crate) async fn acquire_aggregation(
         for_round,
         for_task,
         on_node: nodes.iter().map(|iri| (*iri).as_ref()).collect(),
-    })
-    .await?;
+    })?;
     Ok(())
+}
+
+/// Returns the squared haversine distance between two points, before applying arcsin.
+/// When you only need to compare distances, rather than having the exact distance between
+/// the points, this metric is benefitial because it avoids the expensive square
+/// root computation.
+///
+/// Both a and b must be length 2, and use radians.
+pub fn haversine<T: Float>(a: &[T], b: &[T]) -> T {
+    debug_assert_eq!(a.len(), 2);
+    debug_assert_eq!(b.len(), 2);
+    let two = T::from(2.0).unwrap();
+    let [a_lng, a_lat] = a else { unreachable!() };
+    let [b_lng, b_lat] = b else { unreachable!() };
+    ((*a_lat - *b_lat) / two).sin().powf(two)
+        + a_lat.cos() * b_lat.cos() * ((*a_lng - *b_lng) / two).sin().powf(two)
 }

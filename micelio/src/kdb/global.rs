@@ -1,4 +1,4 @@
-use std::{error::Error, net::SocketAddr};
+use std::{any::Any, error::Error, net::SocketAddr};
 
 use super::KnowledgeDB;
 use crate::Connection;
@@ -133,5 +133,9 @@ impl KnowledgeDB for GlobalKdb {
         )
         .await?;
         Ok(())
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }

@@ -32,15 +32,26 @@ UserApp::~UserApp() { NS_LOG_FUNCTION(this); }
 
 void UserApp::StartApplication() {
     NS_LOG_FUNCTION(this);
-    micelio::UserApp::spawn(*this->sim_params, this->params);
+    switch (this->appOption)
+    {
+    case USER_TRASH:
+        micelio::UserApp::spawn_trash(*this->sim_params, this->params);
+        break;
+    case USER_BIKES:
+        micelio::UserApp::spawn_bikes(*this->sim_params, this->params);
+        break;
+    default:
+        NS_ASSERT_MSG(false, "invalid app option");
+    }
     nsrs::run();
 }
 
 void UserApp::StopApplication() { NS_LOG_FUNCTION(this); }
 
-void UserApp::SetParams(micelio::SimulationParams *sim_params, micelio::UserAppParams params) {
+void UserApp::SetParams(micelio::SimulationParams *sim_params, int appOption, micelio::UserAppParams params) {
     this->params = params;
     this->sim_params = sim_params;
+    this->appOption = appOption;
 }
 
 } // Namespace ns3

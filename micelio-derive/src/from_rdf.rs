@@ -27,22 +27,26 @@ pub fn expand(ast: &syn::DeriveInput) -> syn::Result<TokenStream> {
         (quote!('g), vec![quote!('g)])
     };
 
-    let (use_subject, init_impl) = match &ast.data {
+    let (use_subject, rdftype_att, init_impl) = match &ast.data {
         syn::Data::Struct(syn::DataStruct { fields, .. }) => {
-            let (use_subject, fields_impl, init_impl) = match fields {
+            let (use_subject, rdftype_att, fields_impl, init_impl) = match fields {
                 syn::Fields::Named(fields) => parse_named_fields(tname, fields, &pmap),
                 syn::Fields::Unnamed(fields) => parse_unnamed_fields(tname, fields, &pmap),
                 _ => Err(syn::Error::new(ast.span(), "expected struct with fields")),
             }?;
             Ok((
                 use_subject,
+                rdftype_att,
                 quote! {
                     #fields_impl
                     #init_impl
                 },
             ))
         }
-        syn::Data::Enum(syn::DataEnum { variants, .. }) => parse_enum_variants(variants, &pmap),
+        syn::Data::Enum(syn::DataEnum { variants, .. }) => {
+            let (use_subject, init_impl) = parse_enum_variants(variants, &pmap)?;
+            Ok((use_subject, None, init_impl))
+        },
         _ => Err(syn::Error::new(
             ast.span(),
             "expected struct or enum with fields",
@@ -80,13 +84,30 @@ pub fn expand(ast: &syn::DeriveInput) -> syn::Result<TokenStream> {
         }
     });
 
+    let rdf_type_ref_impl = rdftype_att.map(|t| {
+        let expr = match t {
+            FieldId::Named(name) => quote!( self.#name ),
+            FieldId::Unnamed(i) => quote!( self.#i ),
+        };
+        quote! {
+            impl #generics ::micelio_rdf::RdfTypeRef for #tname #generics {
+                fn rdf_type_ref<'r>(&'r self) -> ::oxiri::Iri<&'r str> {
+                    #expr
+                }
+            }
+        }
+    });
+
     Ok(quote! {
         #from_rdf_impl
         #rdf_type_impl
+        #rdf_type_ref_impl
     })
 }
 
-fn parse_base_attributes(ast: &syn::DeriveInput) -> syn::Result<(PrefixMap, Option<Iri<String>>)> {
+pub(crate) fn parse_base_attributes(
+    ast: &syn::DeriveInput,
+) -> syn::Result<(PrefixMap, Option<Iri<String>>)> {
     let mut pmap = PrefixMap::new();
     let mut rdf_type = None;
     for attr in ast.attrs.iter() {
@@ -109,14 +130,14 @@ fn parse_type_attr(pmap: &PrefixMap, attr: &syn::Attribute) -> syn::Result<Iri<S
     attr.iri(pmap)
 }
 
-enum NamedTermAttr {
+pub(crate) enum NamedTermAttr {
     #[allow(unused)]
     Iri(Span, Iri<String>),
     PName(Span, PrefixedName),
 }
 
 impl NamedTermAttr {
-    fn iri(self, pmap: &PrefixMap) -> syn::Result<Iri<String>> {
+    pub(crate) fn iri(self, pmap: &PrefixMap) -> syn::Result<Iri<String>> {
         match self {
             NamedTermAttr::Iri(_, iri) => Ok(iri),
             NamedTermAttr::PName(span, pname) => pmap
@@ -145,41 +166,49 @@ impl Parse for NamedTermAttr {
     }
 }
 
-fn parse_named_fields(
+fn parse_named_fields<'a>(
     tname: &syn::Ident,
-    fields: &syn::FieldsNamed,
+    fields: &'a syn::FieldsNamed,
     pmap: &PrefixMap,
-) -> syn::Result<(bool, TokenStream, TokenStream)> {
+) -> syn::Result<(bool, Option<FieldId<'a>>, TokenStream, TokenStream)> {
     let mut use_subject = false;
     let mut bindings = TokenStream::new();
     let mut inits = Vec::new();
+    let mut rdftype_att = None;
     for (i, field) in fields.named.iter().enumerate() {
         let fname = field.ident.as_ref().unwrap();
         let field_binding = format_ident!("field{i}");
-        let (s, fexpr) = parse_field_attr(FieldId::Named(fname), field, pmap)?;
+        let (s, fexpr, rdftype) = parse_field_attr(FieldId::Named(fname), field, pmap)?;
         use_subject |= s;
+        if rdftype.is_some() {
+            rdftype_att = rdftype;
+        }
         bindings.extend(quote! {let #field_binding = #fexpr;});
         inits.push(quote! {#fname: #field_binding});
     }
-    Ok((use_subject, bindings, quote!( Ok(#tname { #(#inits),* }) )))
+    Ok((use_subject, rdftype_att, bindings, quote!( Ok(#tname { #(#inits),* }) )))
 }
 
-fn parse_unnamed_fields(
+fn parse_unnamed_fields<'a>(
     tname: &syn::Ident,
-    fields: &syn::FieldsUnnamed,
+    fields: &'a syn::FieldsUnnamed,
     pmap: &PrefixMap,
-) -> syn::Result<(bool, TokenStream, TokenStream)> {
+) -> syn::Result<(bool, Option<FieldId<'a>>, TokenStream, TokenStream)> {
     let mut use_subject = false;
     let mut bindings = TokenStream::new();
     let mut inits = Vec::new();
+    let mut rdftype_att = None;
     for (i, field) in fields.unnamed.iter().enumerate() {
         let field_binding = format_ident!("field{i}");
-        let (s, fexpr) = parse_field_attr(FieldId::Unnamed(i), field, pmap)?;
+        let (s, fexpr, rdftype) = parse_field_attr(FieldId::Unnamed(i), field, pmap)?;
         use_subject |= s;
+        if rdftype.is_some() {
+            rdftype_att = rdftype;
+        }
         bindings.extend(quote! {let #field_binding = #fexpr;});
         inits.push(field_binding);
     }
-    Ok((use_subject, bindings, quote!( Ok(#tname ( #(#inits),* )) )))
+    Ok((use_subject, rdftype_att, bindings, quote!( Ok(#tname ( #(#inits),* )) )))
 }
 
 fn parse_enum_variants(
@@ -238,13 +267,14 @@ fn parse_enum_variants(
     ))
 }
 
-enum FieldId<'a> {
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum FieldId<'a> {
     Named(&'a syn::Ident),
     Unnamed(usize),
 }
 
 impl<'a> FieldId<'a> {
-    fn derive_map_err(&self) -> TokenStream {
+    pub(crate) fn derive_map_err(&self) -> TokenStream {
         match self {
             Self::Named(name) => {
                 quote!(|e| ::micelio_rdf::error::DeriveError::Named(stringify!(#name), Box::new(e)))
@@ -256,11 +286,11 @@ impl<'a> FieldId<'a> {
     }
 }
 
-fn parse_field_attr(
-    field_id: FieldId,
+fn parse_field_attr<'a>(
+    field_id: FieldId<'a>,
     field: &syn::Field,
     pmap: &PrefixMap,
-) -> syn::Result<(bool, TokenStream)> {
+) -> syn::Result<(bool, TokenStream, Option<FieldId<'a>>)> {
     match field
         .attrs
         .iter()
@@ -273,15 +303,18 @@ fn parse_field_attr(
         .next()
     {
         Some((_, FieldKind::Subject)) => {
-            subject_field_attr_expr(field, field_id).map(|e| (false, e))
+            subject_field_attr_expr(field, field_id).map(|e| (false, e, None))
+        }
+        Some((_, FieldKind::Type)) => {
+            type_field_attr_expr(field, &field_id).map(|e| (false, e, Some(field_id)))
         }
         Some((attr, FieldKind::Predicate)) => {
-            predicate_field_attr_expr(field, field_id, attr, pmap).map(|e| (true, e))
+            predicate_field_attr_expr(field, field_id, attr, pmap).map(|e| (true, e, None))
         }
         Some((attr, FieldKind::Predicates)) => {
-            predicates_field_attr_expr(field, field_id, attr, pmap).map(|e| (true, e))
+            predicates_field_attr_expr(field, field_id, attr, pmap).map(|e| (true, e, None))
         }
-        None => Ok((false, quote!(Default::default()))),
+        None => Ok((false, quote!(Default::default()), None)),
     }
 }
 
@@ -293,6 +326,26 @@ fn subject_field_attr_expr(field: &syn::Field, field_id: FieldId) -> syn::Result
             ::from_rdf_term(graph, term)
             .map_err(#maperr)?
     ))
+}
+
+fn type_field_attr_expr(field: &syn::Field, field_id: &FieldId) -> syn::Result<TokenStream> {
+    let ty = &field.ty;
+    let maperr = field_id.derive_map_err();
+    Ok(quote!({
+        let predicate = ::oxrdf::vocab::rdf::TYPE;
+        match graph.object_for_subject_predicate(subject, predicate) {
+            Some(object) => {
+                <#ty as ::micelio_rdf::FromRdf>::from_rdf_term(graph, object)
+                    .map_err(#maperr)
+            },
+            None => {
+                Err(::micelio_rdf::error::FromRdfError::NoMatchingObject {
+                    subject: subject.into(),
+                    predicate: predicate.into(),
+                }).map_err(#maperr)
+            }
+        }?
+    }))
 }
 
 fn predicate_field_attr_expr(
@@ -328,7 +381,7 @@ fn predicate_field_attr_expr(
     }))
 }
 
-struct PredicateAttrArgs(NamedTermAttr, Option<DefaultArg>);
+pub(crate) struct PredicateAttrArgs(pub(crate) NamedTermAttr, pub(crate) Option<DefaultArg>);
 
 impl Parse for PredicateAttrArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
@@ -343,7 +396,7 @@ impl Parse for PredicateAttrArgs {
     }
 }
 
-enum DefaultArg {
+pub(crate) enum DefaultArg {
     Trait,
     Custom(syn::Expr),
 }
@@ -395,9 +448,11 @@ fn predicates_field_attr_expr(
     }))
 }
 
-fn get_field_kind(ident: &syn::Ident) -> Option<FieldKind> {
+pub(crate) fn get_field_kind(ident: &syn::Ident) -> Option<FieldKind> {
     if ident == "subject" {
         Some(FieldKind::Subject)
+    } else if ident == "rdftype" {
+        Some(FieldKind::Type)
     } else if ident == "predicate" {
         Some(FieldKind::Predicate)
     } else if ident == "predicates" {
@@ -407,8 +462,9 @@ fn get_field_kind(ident: &syn::Ident) -> Option<FieldKind> {
     }
 }
 
-enum FieldKind {
+pub(crate) enum FieldKind {
     Subject,
+    Type,
     Predicate,
     Predicates,
 }

@@ -113,6 +113,16 @@ impl<Kdb: KnowledgeDB> CloudBroker<Kdb> {
     }
 
     pub async fn acquire_context_ttl(&self, data: Vec<u8>) -> io::Result<()> {
+        // Due to hardware/storage constraints, we limit the number of actual writes
+        let discard_ratio_for_centralized_case: Option<f64> =
+            std::env::var("SIM_DISCARD_RATIO_FOR_CENTRALIZED_CASE")
+                .ok()
+                .and_then(|r| r.parse().ok());
+        if let Some(ratio) = discard_ratio_for_centralized_case {
+            if rand::random::<f64>() < ratio {
+                return Ok(());
+            }
+        }
         self.kdb
             .insert_ttl(data)
             .await
@@ -242,11 +252,13 @@ WHERE {{
     {{
         ?ctx rdfs:subClassOf ?att.
         OPTIONAL {{ ?ctx mcl:visibility ?vis . }}
-        ?att a mcl:WithAttribute .
-        ?att mcl:onProperty ?prop .
-        ?att mcl:onRange ?type .
-        OPTIONAL {{ ?att mcl:isKey ?key . }}
-        OPTIONAL {{ ?att mcl:referenceUnit ?unit . }}
+        OPTIONAL {{
+            ?att a mcl:WithAttribute .
+            ?att mcl:onProperty ?prop .
+            ?att mcl:onRange ?type .
+            OPTIONAL {{ ?att mcl:isKey ?key . }}
+            OPTIONAL {{ ?att mcl:referenceUnit ?unit . }}
+        }}
     }}
     
     {{
@@ -256,7 +268,7 @@ WHERE {{
         SELECT DISTINCT (?depCtx as ?ctx)
         WHERE {{
             VALUES ?srcCtx {{ {ctx_values} }}
-            ?srcCtx rdfs:subClassOf ?srcAtt.
+            ?srcCtx rdfs:subClassOf* ?srcAtt.
             ?srcAtt a mcl:WithAttribute.
             ?srcAtt (mcl:onRange / rdfs:subClassOf)* / mcl:onRange ?depCtx.
             ?depCtx rdfs:subClassOf [ a mcl:WithAttribute ] .
@@ -272,7 +284,7 @@ WHERE {{
         WHERE {{
             VALUES ?algo {{ {alg_values} }}
             ?algo mcl:acquires ?algCtx.
-            ?algCtx rdfs:subClassOf ?algAtt.
+            ?algCtx rdfs:subClassOf* ?algAtt.
             ?algAtt a mcl:WithAttribute.
             ?algAtt (mcl:onRange / rdfs:subClassOf)* / mcl:onRange ?depCtx.
             ?depCtx rdfs:subClassOf [ a mcl:WithAttribute ] .
@@ -395,7 +407,7 @@ WHERE {{
         self.kdb
             .update(&query)
             .await
-            .inspect_err(|e| nsrs::log!("[FlCoordinator] failed to store task status: {e}"))
+            .inspect_err(|e| nsrs::log!("[FlCoordinator][{task}] failed to store task status: {e}"))
             .unwrap_or_default();
     }
 

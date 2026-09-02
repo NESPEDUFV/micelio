@@ -1,12 +1,15 @@
 //! Micelio: MIddleware for Context rEasoning through federated Learning in the IOT computing continuum
 
+#[cfg(feature = "cloud")]
 pub mod cloud;
 #[cfg(feature = "coap")]
 pub mod coap;
 pub mod dto;
+#[cfg(feature = "edge")]
 pub mod edge;
 pub mod error;
 pub mod fl;
+#[cfg(feature = "fog")]
 pub mod fog;
 pub mod kdb;
 pub mod vocab;

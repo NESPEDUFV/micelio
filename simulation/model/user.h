@@ -9,6 +9,9 @@
 #include "ns3/ptr.h"
 #include "ns3/traced-callback.h"
 
+#define USER_TRASH 1
+#define USER_BIKES 2
+
 namespace ns3 {
 
 class Socket;
@@ -24,7 +27,7 @@ public:
     UserApp();
     ~UserApp() override;
 
-    void SetParams(micelio::SimulationParams *sim_params, micelio::UserAppParams params);
+    void SetParams(micelio::SimulationParams *sim_params, int appOption, micelio::UserAppParams params);
 
 private:
     void StartApplication() override;
@@ -32,6 +35,7 @@ private:
 
     micelio::UserAppParams params;
     micelio::SimulationParams *sim_params;
+    int appOption;
 
     /// Callbacks for tracing the packet Tx events, includes source and
     /// destination addresses

@@ -46,6 +46,26 @@ impl From<FromUtf8Error> for KdbProxyError {
 }
 
 #[derive(Debug, Error)]
+pub enum LayoutValidationError {
+    #[error("keys don't match between target and feature")]
+    BadKeys,
+    #[cfg(feature = "ft-eng")]
+    #[error("in derivation for {0}, implicit expression requires a single attribute")]
+    BadImplicitExpression(Iri<String>),
+    #[cfg(feature = "ft-eng")]
+    #[error("in derivation for {0}, at least 1 attribute is required")]
+    MissingAttributes(Iri<String>),
+}
+
+#[derive(Debug, Error)]
+pub enum DatasetExtractionError {
+    #[error("failed to query knowledge database: {0}")]
+    FailedQuery(#[source] Box<dyn Error>),
+    #[error("attribute {0} has no fragment")]
+    NoFragment(Iri<String>),
+}
+
+#[derive(Debug, Error)]
 pub enum SignupError {
     #[error("failed to query knowledge database: {0}")]
     FailedQuery(#[source] Box<dyn Error>),
@@ -53,7 +73,7 @@ pub enum SignupError {
     FailedDecode(String),
     #[error("failed to register nodes into knowledge database: {0}")]
     FailedSignup(#[source] Box<dyn Error>),
-    #[error("schemas for the following context classes are missing: {0:?}")]
+    #[error("schemas for the following context classes are missing: {}", _0.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(", "))]
     MissingSchemas(Vec<Name>),
 }
 
@@ -77,6 +97,8 @@ pub enum TriggerTaskError {
     FailedDecode(String),
     #[error("failed to perform node mapping: {0}")]
     NodeMapFail(#[source] FlNodeMapError),
+    #[error("failed to validate task layout: {0}")]
+    BadLayout(#[source] LayoutValidationError),
 }
 
 #[derive(Debug, Error)]
@@ -98,6 +120,12 @@ impl<'g> From<DeriveError<'g>> for TriggerTaskError {
 impl<'g> From<FromRdfError<'g>> for TriggerTaskError {
     fn from(value: FromRdfError<'g>) -> Self {
         Self::FailedDecode(value.to_string())
+    }
+}
+
+impl From<LayoutValidationError> for TriggerTaskError {
+    fn from(value: LayoutValidationError) -> Self {
+        Self::BadLayout(value)
     }
 }
 
@@ -123,14 +151,14 @@ pub enum EdgeStartTaskError {
     NameError(NameError),
     #[error("ML algorithm {0} is not in catalog")]
     MlNotFound(Name),
-    #[error("failed to start ML algorithm {}: {}", .0, &.1.to_string()[..512])]
+    #[error("failed to start ML algorithm {}: {}", .0, .1.to_string().chars().take(512).collect::<String>())]
     MlStartFail(Name, #[source] Box<dyn Error>),
     #[error("failed to prepare data: {0}")]
     MlDataFail(#[source] Box<dyn Error>),
     #[error("failed to register task execution: {0}")]
     FailedTaskRegister(#[source] Box<dyn Error>),
     #[error("failed to get dataset: {0}")]
-    FailedDataset(#[source] Box<dyn Error>),
+    FailedDataset(#[source] DatasetExtractionError),
     #[error("IO error: {0}")]
     IoError(#[source] std::io::Error),
 }
@@ -347,7 +375,7 @@ pub enum FlSelectTrainError {
 
 #[derive(Debug, Error)]
 pub enum FlAggTrainError {
-    #[error("not enough wegihts (expected {expected}, got {got})")]
+    #[error("not enough weights (expected {expected}, got {got})")]
     NotEnoughWeights { expected: usize, got: usize },
     #[error("weight keys mismatched (expected {expected:?}, got {got:?})")]
     WeightKeysMismatch {

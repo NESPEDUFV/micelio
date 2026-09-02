@@ -11,7 +11,7 @@ use crate::{
         context::{CcLayer, FlContext},
         fl_algorithm::FlAlgorithm,
         nodemap::NodeMap,
-        task::{FlTaskLayout, MlAlgorithmInfo},
+        task::{FlTaskLayout, MlAlgorithmInfo, RawFlTaskLayout},
         utils::acquire_aggregation,
     },
     kdb::{KnowledgeDB, KnowledgeDBExt},
@@ -21,14 +21,7 @@ use coap_lite::RequestType as Method;
 use micelio_rdf::{GraphDecode, GraphEncode, Name};
 use oxiri::Iri;
 use oxrdf::{Graph, NamedNodeRef, TermRef, TripleRef, vocab::rdf};
-use std::{
-    collections::{HashMap, HashSet},
-    error::Error,
-    io,
-    net::SocketAddr,
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::HashSet, error::Error, io, net::SocketAddr, sync::Arc, time::Duration};
 
 pub(crate) struct FlCoordinator<Kdb: KnowledgeDB> {
     pub broker: Arc<CloudBroker<Kdb>>,
@@ -59,14 +52,6 @@ impl<Kdb: KnowledgeDB> FlCoordinator<Kdb> {
             get_task_deps(broker.kdb.as_ref(), &request.task, &request.ml_algorithm).await?;
         let ml_algorithm = extract_ml_algorithm(&graph, request.ml_algorithm)?;
         let task_layout = extract_task_layout(&graph, task_layout_iri.as_ref(), request.task)?;
-        let required_ctx = extract_required_ctx_classes(
-            &graph,
-            task_layout.iri.as_ref(),
-            fl_algorithm.as_ref(),
-            &ml_algorithm,
-        )?;
-        let clients =
-            extract_compatible_clients(broker.kdb.as_ref(), &ml_algorithm, required_ctx).await?;
         let task_iri = create_task_instance(broker.kdb.as_ref(), task_layout.iri.as_ref()).await?;
         let mut ctx = FlContext::new(
             CcLayer::Cloud,
@@ -77,6 +62,11 @@ impl<Kdb: KnowledgeDB> FlCoordinator<Kdb> {
             broker.kdb.clone(),
             None,
         );
+        let fl_depends_on = fl_algorithm.depends_on();
+        let required_ctx =
+            extract_required_ctx_classes(&graph, &ctx.task_layout, fl_depends_on, &ml_algorithm)?;
+        let clients =
+            extract_compatible_clients(broker.kdb.as_ref(), &ml_algorithm, required_ctx).await?;
         let node_mapping = fl_algorithm
             .map_nodes(&mut ctx, &clients)
             .await
@@ -109,11 +99,15 @@ impl<Kdb: KnowledgeDB> FlCoordinator<Kdb> {
             .kdb
             .prefixes()
             .unresolve(self.ctx.task_iri.as_ref());
-        nsrs::log!("[FlCoordinator] start {task_name}");
+        let tl_name = self.ctx.task_layout_name();
+        nsrs::log!("[FlCoordinator][{tl_name}] start!");
         self.start_fog(&task_name).await?;
         self.start_edge(&task_name).await?;
         while !self.fl_algorithm.hit_stop_condition(&mut self.ctx).await? {
-            nsrs::log!("[FlCoordinator] round #{} training...", self.ctx.round);
+            nsrs::log!(
+                "[FlCoordinator][{tl_name}][round #{}] training...",
+                self.ctx.round
+            );
             self.train(&task_name).await?;
             let should_global_agg = self
                 .fl_algorithm
@@ -121,16 +115,19 @@ impl<Kdb: KnowledgeDB> FlCoordinator<Kdb> {
                 .await
                 .map_err(|e| CloudRoundError::ShouldGlobalAggError(e))?;
             nsrs::log!(
-                "[FlCoordinator] aggregating gloablly? {}",
+                "[FlCoordinator][{tl_name}][round #{}] aggregating gloablly? {}",
+                self.ctx.round,
                 should_global_agg
             );
             let weights = if should_global_agg {
-                nsrs::log!("[FlCoordinator] round #{} global agg...", self.ctx.round);
                 self.global_agg(&task_name).await?
             } else {
                 None
             };
-            nsrs::log!("[FlCoordinator] round #{} eval...", self.ctx.round);
+            nsrs::log!(
+                "[FlCoordinator][{tl_name}][round #{}] evaluating...",
+                self.ctx.round
+            );
             self.eval(&task_name, weights).await?;
             self.fl_algorithm
                 .aggregate_eval(
@@ -148,13 +145,12 @@ impl<Kdb: KnowledgeDB> FlCoordinator<Kdb> {
     }
 
     async fn start_fog(&mut self, task_name: &Name) -> io::Result<()> {
-        nsrs::log!("[FlCoordinator] start_fog");
         let results = nsrs::join_all_with_timeout(
             Duration::from_secs(30),
             self.node_mapping.iter().map(|(_, agg)| {
                 let broker = self.broker.clone();
                 let task_name = task_name.clone();
-                let task_class = self.ctx.task_class.clone();
+                let task_layout = self.ctx.task_layout.clone();
                 let prefixes = broker.kdb.prefixes();
                 let fl_algorithm = self.fl_algorithm_name.clone();
                 let params = self.fl_params.clone();
@@ -168,14 +164,13 @@ impl<Kdb: KnowledgeDB> FlCoordinator<Kdb> {
                     let conn = Connection::to(agg.addr).await?;
                     let payload = FogStartTaskRequest {
                         task_name,
-                        task_class,
+                        task_layout,
                         fl_algorithm,
                         params,
                         clients,
                     };
                     conn.send::<()>(Method::Post, "task", &payload).await?;
                     conn.close().await?;
-                    nsrs::log!("[FlCoordinator] got response from fog node {agg_iri}");
                     Ok(agg_iri) as io::Result<_>
                 }
             }),
@@ -187,7 +182,6 @@ impl<Kdb: KnowledgeDB> FlCoordinator<Kdb> {
     }
 
     async fn start_edge(&mut self, task_name: &Name) -> io::Result<()> {
-        nsrs::log!("[FlCoordinator] start_edge");
         let edge_starts: Vec<_> = self
             .node_mapping
             .iter()
@@ -197,16 +191,12 @@ impl<Kdb: KnowledgeDB> FlCoordinator<Kdb> {
                     .map(|enode| (agg.iri.clone(), agg.addr, enode.clone()))
             })
             .collect();
-        nsrs::log!(
-            "[FlCoordinator] will wait for {} edge nodes",
-            edge_starts.len()
-        );
         let iris: HashSet<_> = nsrs::join_all_with_timeout(
             Duration::from_secs(120),
             edge_starts.into_iter().map(|(agg_iri, agg_addr, enode)| {
                 let broker = self.broker.clone();
                 let task_name = task_name.clone();
-                let task_class = self.ctx.task_class.clone();
+                let task_layout = self.ctx.task_layout.clone();
                 let ml_algorithm = self
                     .broker
                     .kdb
@@ -218,7 +208,7 @@ impl<Kdb: KnowledgeDB> FlCoordinator<Kdb> {
                     let conn = broker.connections.get(&enode).await.clone();
                     let payload = EdgeStartTaskRequest {
                         task_name,
-                        task_class,
+                        task_layout,
                         ml_algorithm,
                         params,
                         agg_name,
@@ -231,7 +221,6 @@ impl<Kdb: KnowledgeDB> FlCoordinator<Kdb> {
         )
         .await
         .into_done_ok()?;
-        nsrs::log!("[FlCoordinator] start edge {:?}", iris.len());
         self.node_mapping.retain_clients(iris.iter().collect());
         Ok(())
     }
@@ -255,6 +244,7 @@ impl<Kdb: KnowledgeDB> FlCoordinator<Kdb> {
     }
 
     async fn global_agg(&mut self, task_name: &Name) -> Result<Option<Weights>, CloudRoundError> {
+        let tl_name = self.ctx.task_layout_name();
         let nodes = self.node_mapping.agg_iris().collect::<Vec<_>>();
         let agg_iri = self
             .fl_algorithm
@@ -262,7 +252,7 @@ impl<Kdb: KnowledgeDB> FlCoordinator<Kdb> {
             .await
             .map_err(|e| CloudRoundError::SelectGlobalAggError(e))?;
         nsrs::log!(
-            "[FlCoordinator] round #{} global aggregator is: {agg_iri:?}",
+            "[FlCoordinator][{tl_name}][round #{}] global aggregator is: {agg_iri:?}",
             self.ctx.round
         );
         if let Some(agg_iri) = agg_iri {
@@ -277,14 +267,6 @@ impl<Kdb: KnowledgeDB> FlCoordinator<Kdb> {
             Ok(None)
         } else {
             let weights = self.global_agg_in_cloud(task_name).await?;
-            nsrs::log!(
-                "[FlCoordinator] round #{} global weights is: {:?}",
-                self.ctx.round,
-                weights
-                    .iter()
-                    .map(|(k, v)| (k, v.len()))
-                    .collect::<HashMap<_, _>>()
-            );
             Ok(Some(weights))
         }
     }
@@ -304,15 +286,11 @@ impl<Kdb: KnowledgeDB> FlCoordinator<Kdb> {
         .await
         .into_all_ok(|| io::Error::new(io::ErrorKind::TimedOut, "timeout"))?;
         let (nodes, weights): (Vec<&Iri<String>>, Vec<_>) = all_weights.into_iter().unzip();
-        nsrs::log!(
-            "[FlCoordinator] round #{} got weights from fog aggs",
-            self.ctx.round
-        );
         let new_weights = self
             .fl_algorithm
             .aggregate_train(&mut self.ctx, &nodes, &weights)
             .await?;
-        acquire_aggregation(&mut self.ctx, &nodes).await?;
+        acquire_aggregation(&mut self.ctx, &nodes)?;
         self.ctx.finish_acquisition().await?;
         Ok(new_weights)
     }
@@ -416,6 +394,75 @@ async fn get_task_deps(
     ml_algorithm: &Name,
 ) -> Result<Graph, TriggerTaskError> {
     let header = kdb.prefixes().sparql_header();
+    #[cfg(not(feature = "ft-eng"))]
+    let query = format!(
+        "{header}
+CONSTRUCT {{
+    ?task a mcl:LearningTaskLayout;
+        mcl:hasFeature ?feature;
+        mcl:hasTarget ?target;
+        mcl:hasPredictFilter ?filter;
+        mcl:requiresParadigm ?paradigm;
+        mcl:dependsOn ?dvDomain;
+        mcl:hasDerivedProperty ?dvProp;
+        .
+    ?algo a mcl:MlAlgorithm;
+        mcl:acquires ?mlCtx;
+        .
+    ?ctx a mcl:ContextClass.
+    ?ctx mcl:visibility ?vis.
+    ?ctx mcl:hasAttribute ?att.
+    ?ctx mcl:derived ?dv.
+
+    ?dv mcl:query ?query.
+    ?dv mcl:onDomain ?dvDomain.
+
+    ?att mcl:onProperty ?prop.
+    ?att mcl:isKey ?key.
+    ?att mcl:onRange ?type.
+}}
+WHERE {{
+    BIND({task_class} AS ?task)
+    ?task a mcl:LearningTaskLayout.
+    OPTIONAL {{ ?task mcl:hasPredictFilter ?filter }}
+    OPTIONAL {{ ?task mcl:requiresParadigm ?p }}
+    BIND(
+        COALESCE(?p, mcl:SupervisedLearning)
+        AS ?paradigm
+    )
+    {{
+        ?task mcl:hasFeature ?feature.
+        BIND(?feature AS ?ctx)
+    }}
+    UNION
+    {{
+        ?task mcl:hasTarget ?target.
+        BIND(?target AS ?ctx)
+    }}
+    ?ctx a owl:Class.
+    ?ctx rdfs:subClassOf* ?att.
+    OPTIONAL {{ ?ctx mcl:visibility ?vis. }}
+    OPTIONAL {{
+        ?ctx mcl:derived ?dv.
+        ?dv mcl:query ?query.
+        ?dv mcl:onDomain ?dvDomain.
+    }}
+
+    ?att a mcl:WithAttribute.
+    ?att mcl:onProperty ?prop.
+    OPTIONAL {{ ?att mcl:onRange ?type }}
+    OPTIONAL {{ ?att mcl:isKey ?key }}
+    
+    OPTIONAL {{
+        BIND({ml_algorithm} AS ?algo)
+        ?algo a mcl:MlAlgorithm.
+        ?algo mcl:inParadigm ?paradigm.
+        OPTIONAL {{ ?algo mcl:acquires ?mlCtx. }}
+    }}
+}}
+"
+    );
+    #[cfg(feature = "ft-eng")]
     let query = format!(
         "{header}
 CONSTRUCT {{
@@ -424,6 +471,7 @@ CONSTRUCT {{
         mcl:hasTarget ?target;
         mcl:requiresParadigm ?paradigm;
         mcl:dependsOn ?dvDomain;
+        mcl:hasDerivedProperty ?dvProp;
         .
     ?algo a mcl:MlAlgorithm;
         mcl:acquires ?mlCtx;
@@ -472,7 +520,7 @@ WHERE {{
     }}
     ?ctx a owl:Class.
     OPTIONAL {{ ?ctx mcl:visibility ?vis. }}
-    ?ctx rdfs:subClassOf ?att.
+    ?ctx rdfs:subClassOf* ?att.
     ?att a mcl:WithAttribute.
     ?att mcl:onProperty ?prop.
     OPTIONAL {{ ?att mcl:onRange ?type }}
@@ -518,18 +566,25 @@ fn extract_task_layout(
     if !graph.contains(TripleRef::new(term, rdf::TYPE, mcl::FL_TASK)) {
         return Err(TriggerTaskError::TaskNotFound(task_layout_name));
     }
-    let task = graph.decode::<FlTaskLayout>(term)?;
-    Ok(task)
+    let layout = graph.decode::<RawFlTaskLayout>(term)?.try_into()?;
+    Ok(layout)
 }
 
 fn extract_required_ctx_classes<'g>(
     graph: &'g Graph,
-    task_layout_iri: Iri<&str>,
-    fl_algorithm: &dyn FlAlgorithm,
+    task_layout: &'g FlTaskLayout,
+    fl_depends_on: HashSet<Iri<&'g str>>,
     ml_algorithm: &'g MlAlgorithmInfo,
 ) -> Result<HashSet<Iri<&'g str>>, TriggerTaskError> {
-    let ml_depends_on = graph
-        .objects_for_subject_predicate(NamedNodeRef::from(task_layout_iri), mcl::DEPENDS_ON)
+    let ml_depends_on_final = HashSet::from([
+        task_layout.target.iri.as_ref(),
+        task_layout.feature.iri.as_ref(),
+    ]);
+    let ml_depends_on_derived = graph
+        .objects_for_subject_predicate(
+            NamedNodeRef::from(task_layout.iri.as_ref()),
+            mcl::DEPENDS_ON,
+        )
         .map(|term| match term {
             TermRef::NamedNode(node) => Ok(Iri::parse_unchecked(node.as_str())),
             _ => Err(TriggerTaskError::FailedDecode(
@@ -537,11 +592,17 @@ fn extract_required_ctx_classes<'g>(
             )),
         })
         .collect::<Result<HashSet<_>, _>>()?;
-    let fl_depends_on = fl_algorithm.depends_on();
-    Ok((&ml_depends_on | &fl_depends_on)
-        .difference(&ml_algorithm.acquires)
-        .copied()
-        .collect())
+    if ml_depends_on_derived.is_empty() {
+        Ok((&ml_depends_on_final | &fl_depends_on)
+            .difference(&ml_algorithm.acquires)
+            .copied()
+            .collect())
+    } else {
+        Ok((&ml_depends_on_derived | &fl_depends_on)
+            .difference(&ml_algorithm.acquires)
+            .copied()
+            .collect())
+    }
 }
 
 async fn extract_compatible_clients(
@@ -555,16 +616,16 @@ async fn extract_compatible_clients(
     let acquires = itertools::join(
         required_ctx
             .into_iter()
-            .map(|iri| format!("mcl:acquires {};", prefixes.unresolve(iri))),
-        " ",
+            .map(|iri| prefixes.unresolve(iri).to_string()),
+        ", ",
     );
     let query = format!(
         "{header}
-SELECT ?node
+SELECT DISTINCT ?node
 WHERE {{
     ?node a mcl:EdgeNode;
         mcl:implements {algo};
-        {acquires}.
+        mcl:acquires {acquires}.
 }}
 "
     );

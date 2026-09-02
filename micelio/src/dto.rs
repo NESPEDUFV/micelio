@@ -1,21 +1,23 @@
 //! Definition of Data Transfer Objects, i.e., types used to communicate among middleware entities.
-use crate::fl::FlTaskLayout;
+use crate::error::LayoutValidationError;
+use crate::fl::task::RawFlTaskLayout;
+use crate::fl::{FlContext, FlTaskLayout};
 use crate::vocab::{
     mcl::{self, mcl},
     task::{self, task},
 };
-use micelio_derive::FromRdf;
-use micelio_rdf::{Name, PrefixedName};
-use micelio_rdf::{RdfType, ToRdf};
+use micelio_derive::{FromRdf, ToRdf};
+use micelio_rdf::{Name, PrefixedName, RdfType, RdfTypeRef, TermAdapter, ToRdf};
 use oxiri::Iri;
-use oxrdf::vocab::{rdf, xsd};
+use oxrdf::vocab::rdf;
 use oxrdf::{
-    BlankNode, Graph, Literal, LiteralRef, NamedNode, NamedNodeRef, NamedOrBlankNode,
-    NamedOrBlankNodeRef, TripleRef,
+    BlankNode, Graph, Literal, NamedNode, NamedNodeRef, NamedOrBlankNode, NamedOrBlankNodeRef,
+    TermRef, TripleRef,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::ops::{Deref, DerefMut};
 
 pub type Config = ciborium::Value;
 pub type Weights = HashMap<String, Vec<f32>>;
@@ -50,9 +52,11 @@ pub struct ContextSchema {
     pub visibility: Visibility,
     #[predicates(mcl:hasAttribute)]
     pub attributes: Vec<ContextAttribute>,
+    #[predicates(mcl:derived)]
+    pub derivation: Option<ContextDerivation>,
 }
 
-#[derive(Debug, Clone, FromRdf, Serialize, Deserialize)]
+#[derive(Debug, Clone, FromRdf, Serialize, Deserialize, PartialEq)]
 #[prefix(mcl:"http://nesped1.caf.ufv.br/micelio/ontology#")]
 pub struct ContextAttribute {
     #[predicate(mcl:onProperty)]
@@ -61,22 +65,38 @@ pub struct ContextAttribute {
     pub key: bool,
     #[predicate(mcl:onRange)]
     pub dtype: Iri<String>,
+    #[cfg(feature = "ft-eng")]
     #[predicates(mcl:referenceUnit)]
     pub unit: Option<Iri<String>>,
+    #[cfg(feature = "ft-eng")]
     #[predicates(mcl:derived)]
-    pub derivation: Option<ContextDerivation>,
+    pub derivation: Option<ContextAttDerivation>,
+    #[cfg(feature = "ft-eng")]
+    #[predicates(mcl:defaultsTo)]
+    pub default: Option<Literal>,
 }
 
-#[derive(Debug, Clone, FromRdf, Serialize, Deserialize)]
+#[derive(Debug, Clone, FromRdf, ToRdf, Serialize, Deserialize, PartialEq)]
 #[prefix(mcl:"http://nesped1.caf.ufv.br/micelio/ontology#")]
 pub struct ContextDerivation {
-    #[predicates(mcl:fromAttribute)]
-    pub attributes: Vec<ContextAttributeBinding>,
-    #[predicate(mcl:fromExpression)]
-    pub expression: String,
+    #[predicate(mcl:query)]
+    pub query: String,
+    #[predicates(mcl:onDomain)]
+    pub domains: Vec<Iri<String>>,
 }
 
-#[derive(Debug, Clone, FromRdf, Serialize, Deserialize)]
+#[cfg(feature = "ft-eng")]
+#[derive(Debug, Clone, FromRdf, Serialize, Deserialize, PartialEq)]
+#[prefix(mcl:"http://nesped1.caf.ufv.br/micelio/ontology#")]
+pub struct ContextAttDerivation {
+    #[predicates(mcl:fromAttribute)]
+    pub attributes: Vec<ContextAttributeBinding>,
+    #[predicates(mcl:fromExpression)]
+    pub expression: Option<String>,
+}
+
+#[cfg(feature = "ft-eng")]
+#[derive(Debug, Clone, FromRdf, ToRdf, Serialize, Deserialize, PartialEq)]
 #[prefix(mcl:"http://nesped1.caf.ufv.br/micelio/ontology#")]
 #[prefix(rdf:"http://www.w3.org/1999/02/22-rdf-syntax-ns#")]
 pub struct ContextAttributeBinding {
@@ -88,14 +108,15 @@ pub struct ContextAttributeBinding {
     pub label: Option<String>,
 }
 
+#[cfg(feature = "ft-eng")]
 #[derive(Debug, Clone, FromRdf, Serialize, Deserialize)]
 #[prefix(mcl:"http://nesped1.caf.ufv.br/micelio/ontology#")]
-#[rdftype(mcl:DerivedProperty)]
 pub struct DerivedProperty {
     #[predicate(mcl:derived)]
     pub derivation: PropDerivation,
 }
 
+#[cfg(feature = "ft-eng")]
 #[derive(Debug, Clone, FromRdf, Serialize, Deserialize)]
 #[prefix(mcl:"http://nesped1.caf.ufv.br/micelio/ontology#")]
 #[prefix(rdf:"http://www.w3.org/1999/02/22-rdf-syntax-ns#")]
@@ -104,10 +125,9 @@ pub struct PropDerivation {
     pub attributes: Vec<PropAttributeBinding>,
     #[predicate(mcl:fromExpression)]
     pub expression: String,
-    #[predicates(rdf:label)]
-    pub label: Option<String>,
 }
 
+#[cfg(feature = "ft-eng")]
 #[derive(Debug, Clone, FromRdf, Serialize, Deserialize)]
 #[prefix(mcl:"http://nesped1.caf.ufv.br/micelio/ontology#")]
 #[prefix(rdf:"http://www.w3.org/1999/02/22-rdf-syntax-ns#")]
@@ -168,23 +188,52 @@ impl ToRdf for ContextAttribute {
         graph: &'g mut Graph,
         subject: NamedOrBlankNodeRef<'g>,
     ) -> NamedOrBlankNodeRef<'g> {
-        let is_key = Literal::from(self.key);
         graph.insert(TripleRef::new(
             subject,
             mcl!("onProperty"),
             NamedNodeRef::from(self.name.as_ref()),
         ));
-        graph.insert(TripleRef::new(subject, mcl!("isKey"), &is_key));
+        graph.insert(TripleRef::new(
+            subject,
+            mcl!("isKey"),
+            &Literal::from(self.key),
+        ));
         graph.insert(TripleRef::new(
             subject,
             mcl!("onRange"),
             NamedNodeRef::from(self.dtype.as_ref()),
         ));
+        #[cfg(feature = "ft-eng")]
+        if let Some(ref derivation) = self.derivation {
+            derivation.into_rdf_triples(graph, subject);
+        }
+        #[cfg(feature = "ft-eng")]
         if let Some(ref unit) = self.unit {
             graph.insert(TripleRef::new(
                 subject,
                 mcl!("referenceUnit"),
                 NamedNodeRef::from(unit.as_ref()),
+            ));
+        }
+        subject
+    }
+}
+
+#[cfg(feature = "ft-eng")]
+impl ToRdf for ContextAttDerivation {
+    fn into_rdf_triples<'g>(
+        &'g self,
+        graph: &'g mut Graph,
+        subject: NamedOrBlankNodeRef<'g>,
+    ) -> NamedOrBlankNodeRef<'g> {
+        for att in self.attributes.iter() {
+            att.into_rdf_triples(graph, subject);
+        }
+        for t in self.expression.iter() {
+            graph.insert(TripleRef::new(
+                subject,
+                mcl!("fromExpression"),
+                &Literal::from(t.as_str()),
             ));
         }
         subject
@@ -235,13 +284,13 @@ impl<'a> ToRdf for ContextMetadata<'a> {
             graph.insert(TripleRef::new(
                 subject,
                 mcl!("acquiredAt"),
-                &Literal::new_typed_literal(self.acquired_at.to_rfc3339(), xsd::DATE_TIME),
+                &TermAdapter::from(&self.acquired_at),
             ));
         }
         graph.insert(TripleRef::new(
             subject,
             mcl!("acquiredBy"),
-            NamedNodeRef::from(self.acquired_by),
+            &TermAdapter::from(&self.acquired_by),
         ));
         subject
     }
@@ -274,14 +323,14 @@ pub struct GetTaskResponse {
     pub status_msg: Option<String>,
 }
 
-#[derive(Debug, Clone, FromRdf)]
+#[derive(Debug, Clone, FromRdf, ToRdf)]
 #[prefix(mcl:"http://nesped1.caf.ufv.br/micelio/ontology#")]
 #[rdftype(mcl:LearningTask)]
-pub struct FlTaskInstance<'g> {
+pub struct FlTaskInstance<'a> {
     #[subject]
     pub iri: Iri<String>,
     #[predicate(mcl:instanceOf)]
-    pub task_class: Iri<&'g str>,
+    pub task_class: Iri<&'a str>,
     #[predicate(mcl:hasStatus)]
     pub status: FlTaskStatus,
     #[predicates(mcl:hasStatusMessage)]
@@ -299,39 +348,6 @@ impl<'g> FlTaskInstance<'g> {
     }
 }
 
-impl<'a> ToRdf for FlTaskInstance<'a> {
-    fn into_rdf_triples<'g>(
-        &'g self,
-        graph: &'g mut Graph,
-        _subject: NamedOrBlankNodeRef<'g>,
-    ) -> NamedOrBlankNodeRef<'g> {
-        let subject = NamedNodeRef::from(self.iri.as_ref());
-        graph.insert(TripleRef::new(
-            subject,
-            rdf::TYPE,
-            NamedNodeRef::from(Self::rdf_type()),
-        ));
-        graph.insert(TripleRef::new(
-            subject,
-            mcl!("instanceOf"),
-            NamedNodeRef::from(self.task_class.as_ref()),
-        ));
-        graph.insert(TripleRef::new(
-            subject,
-            mcl!("hasStatus"),
-            NamedNodeRef::from(self.status),
-        ));
-        if let Some(ref msg) = self.status_msg {
-            graph.insert(TripleRef::new(
-                subject,
-                mcl!("hasStatusMessage"),
-                LiteralRef::from(msg.as_str()),
-            ));
-        }
-        subject.into()
-    }
-}
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, FromRdf)]
 #[prefix(mcl:"http://nesped1.caf.ufv.br/micelio/ontology#")]
 #[prefix(task:"http://nesped1.caf.ufv.br/micelio/tasks#")]
@@ -343,6 +359,12 @@ pub enum FlTaskStatus {
     Error,
     #[subject(task:Ok)]
     Ok,
+}
+
+impl<'a> From<&FlTaskStatus> for TermAdapter<NamedNodeRef<'a>> {
+    fn from(value: &FlTaskStatus) -> Self {
+        Self((*value).into())
+    }
 }
 
 impl From<FlTaskStatus> for NamedNodeRef<'static> {
@@ -374,7 +396,7 @@ impl From<FlTaskStatus> for Name {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EdgeStartTaskRequest {
     pub task_name: Name,
-    pub task_class: FlTaskLayout,
+    pub task_layout: FlTaskLayout,
     pub ml_algorithm: Name,
     pub params: Config,
     pub agg_name: Name,
@@ -384,7 +406,7 @@ pub struct EdgeStartTaskRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FogStartTaskRequest {
     pub task_name: Name,
-    pub task_class: FlTaskLayout,
+    pub task_layout: FlTaskLayout,
     pub fl_algorithm: Name,
     pub params: Config,
     pub clients: Vec<Name>,
@@ -446,72 +468,37 @@ pub struct FogSetWeightsRequest {
     pub weights: Weights,
 }
 
-#[derive(Debug, Clone, FromRdf)]
+#[derive(Debug, Clone, FromRdf, ToRdf)]
 #[prefix(mcl:"http://nesped1.caf.ufv.br/micelio/ontology#")]
-#[rdftype(mcl:NodeGeolocation)]
-pub struct NodeGeolocation<'g> {
-    #[predicate(mcl:x, default)]
-    pub x: f64,
-    #[predicate(mcl:y, default)]
-    pub y: f64,
-    #[predicate(mcl:z, default)]
-    pub z: f64,
+#[rdftype(mcl:Geolocation)]
+pub struct Geolocation<'a> {
+    #[predicate(mcl:longitude, default)]
+    pub longitude: f64,
+    #[predicate(mcl:latitude, default)]
+    pub latitude: f64,
     #[predicate(mcl:isLocationOf)]
-    pub location_of: Iri<&'g str>,
+    pub location_of: Iri<&'a str>,
 }
 
-impl<'a> ToRdf for NodeGeolocation<'a> {
-    fn into_rdf_triples<'g>(
-        &'g self,
-        graph: &'g mut Graph,
-        subject: NamedOrBlankNodeRef<'g>,
-    ) -> NamedOrBlankNodeRef<'g> {
-        let coords = [
-            Literal::from(self.x),
-            Literal::from(self.y),
-            Literal::from(self.z),
-        ];
-        graph.insert(TripleRef::new(
-            subject,
-            rdf::TYPE,
-            NamedNodeRef::from(Self::rdf_type()),
-        ));
-        graph.insert(TripleRef::new(
-            subject,
-            NamedNodeRef::new_unchecked("http://nesped1.caf.ufv.br/micelio/ontology#x"),
-            &coords[0],
-        ));
-        graph.insert(TripleRef::new(
-            subject,
-            NamedNodeRef::new_unchecked("http://nesped1.caf.ufv.br/micelio/ontology#y"),
-            &coords[1],
-        ));
-        graph.insert(TripleRef::new(
-            subject,
-            NamedNodeRef::new_unchecked("http://nesped1.caf.ufv.br/micelio/ontology#z"),
-            &coords[2],
-        ));
-        graph.insert(TripleRef::new(
-            subject,
-            NamedNodeRef::new_unchecked("http://nesped1.caf.ufv.br/micelio/ontology#isLocationOf"),
-            NamedNodeRef::from(self.location_of),
-        ));
-        subject
-    }
-}
-
-impl<'a> NodeGeolocation<'a> {
-    pub fn new(pos: [f64; 3], entity: Iri<&'a str>) -> Self {
+impl<'a> Geolocation<'a> {
+    pub fn new_deg(pos: [f64; 2], entity: Iri<&'a str>) -> Self {
         Self {
-            x: pos[0],
-            y: pos[1],
-            z: pos[2],
+            longitude: pos[0],
+            latitude: pos[1],
+            location_of: entity,
+        }
+    }
+
+    pub fn new_rad(pos: [f64; 2], entity: Iri<&'a str>) -> Self {
+        Self {
+            longitude: pos[0].to_degrees(),
+            latitude: pos[1].to_degrees(),
             location_of: entity,
         }
     }
 }
 
-#[derive(Debug, Clone, FromRdf)]
+#[derive(Debug, Clone, FromRdf, ToRdf)]
 #[prefix(mcl:"http://nesped1.caf.ufv.br/micelio/ontology#")]
 #[prefix(rdf:"http://www.w3.org/1999/02/22-rdf-syntax-ns#")]
 #[rdftype(mcl:DatasetSize)]
@@ -522,87 +509,50 @@ pub struct DatasetSize {
     pub for_task: Iri<String>,
 }
 
-impl ToRdf for DatasetSize {
-    fn into_rdf_triples<'g>(
-        &'g self,
-        graph: &'g mut Graph,
-        subject: NamedOrBlankNodeRef<'g>,
-    ) -> NamedOrBlankNodeRef<'g> {
-        graph.insert(TripleRef::new(
-            subject,
-            rdf::TYPE,
-            NamedNodeRef::from(Self::rdf_type()),
-        ));
-        graph.insert(TripleRef::new(
-            subject,
-            rdf::VALUE,
-            &Literal::from(self.value),
-        ));
-        graph.insert(TripleRef::new(
-            subject,
-            mcl!("forTask"),
-            NamedNodeRef::from(self.for_task.as_ref()),
-        ));
-        subject
-    }
+macro_rules! impl_metric {
+    ($T:ident) => {
+        #[derive(Debug, Clone, FromRdf, ToRdf)]
+        #[prefix(mcl:"http://nesped1.caf.ufv.br/micelio/ontology#")]
+        #[prefix(rdf:"http://www.w3.org/1999/02/22-rdf-syntax-ns#")]
+        #[rdftype(mcl:$T)]
+        pub struct $T {
+            #[predicate(rdf:value)]
+            pub value: f64,
+            #[predicate(mcl:forTask)]
+            pub for_task: Iri<String>,
+            #[predicate(mcl:forRound)]
+            pub for_round: u64,
+        }
+
+        impl $T {
+            pub fn for_context(ctx: &FlContext, value: f64) -> Self {
+                Self {
+                    value,
+                    for_task: ctx.task_iri().clone(),
+                    for_round: ctx.round(),
+                }
+            }
+        }
+    };
 }
 
-#[derive(Debug, Clone, FromRdf)]
-#[prefix(mcl:"http://nesped1.caf.ufv.br/micelio/ontology#")]
-#[prefix(rdf:"http://www.w3.org/1999/02/22-rdf-syntax-ns#")]
-#[rdftype(mcl:Accuracy)]
-pub struct Accuracy {
-    #[predicate(rdf:value)]
-    pub value: f64,
-    #[predicate(mcl:forTask)]
-    pub for_task: Iri<String>,
-    #[predicate(mcl:forRound)]
-    pub for_round: u64,
-}
+impl_metric!(Accuracy);
+impl_metric!(MeanSquaredError);
+impl_metric!(RootMeanSquaredError);
+impl_metric!(MeanAbsoluteError);
+impl_metric!(MeanAbsolutePercentError);
 
-impl From<ConfusionMatrix> for Accuracy {
-    fn from(value: ConfusionMatrix) -> Self {
-        let correct = value.true_positive + value.true_negative;
-        let all = correct + value.false_positive + value.false_negative;
+impl From<MeanSquaredError> for RootMeanSquaredError {
+    fn from(value: MeanSquaredError) -> Self {
         Self {
-            value: (correct as f64) / (all as f64),
+            value: value.value.sqrt(),
             for_task: value.for_task,
             for_round: value.for_round,
         }
     }
 }
 
-impl ToRdf for Accuracy {
-    fn into_rdf_triples<'g>(
-        &'g self,
-        graph: &'g mut Graph,
-        subject: NamedOrBlankNodeRef<'g>,
-    ) -> NamedOrBlankNodeRef<'g> {
-        graph.insert(TripleRef::new(
-            subject,
-            rdf::TYPE,
-            NamedNodeRef::from(Self::rdf_type()),
-        ));
-        graph.insert(TripleRef::new(
-            subject,
-            rdf::VALUE,
-            &Literal::from(self.value),
-        ));
-        graph.insert(TripleRef::new(
-            subject,
-            mcl!("forRound"),
-            &Literal::from(self.for_round),
-        ));
-        graph.insert(TripleRef::new(
-            subject,
-            mcl!("forTask"),
-            NamedNodeRef::from(self.for_task.as_ref()),
-        ));
-        subject
-    }
-}
-
-#[derive(Debug, Clone, FromRdf)]
+#[derive(Debug, Clone, FromRdf, ToRdf)]
 #[prefix(mcl:"http://nesped1.caf.ufv.br/micelio/ontology#")]
 #[rdftype(mcl:Aggregation)]
 pub struct Aggregation<'a> {
@@ -614,39 +564,7 @@ pub struct Aggregation<'a> {
     pub on_node: Vec<Iri<&'a str>>,
 }
 
-impl<'a> ToRdf for Aggregation<'a> {
-    fn into_rdf_triples<'g>(
-        &'g self,
-        graph: &'g mut Graph,
-        subject: NamedOrBlankNodeRef<'g>,
-    ) -> NamedOrBlankNodeRef<'g> {
-        graph.insert(TripleRef::new(
-            subject,
-            rdf::TYPE,
-            NamedNodeRef::from(Self::rdf_type()),
-        ));
-        graph.insert(TripleRef::new(
-            subject,
-            mcl!("forRound"),
-            &Literal::from(self.for_round),
-        ));
-        graph.insert(TripleRef::new(
-            subject,
-            mcl!("forTask"),
-            NamedNodeRef::from(self.for_task.as_ref()),
-        ));
-        for node in self.on_node.iter() {
-            graph.insert(TripleRef::new(
-                subject,
-                mcl!("onNode"),
-                NamedNodeRef::from(node.as_ref()),
-            ));
-        }
-        subject
-    }
-}
-
-#[derive(Debug, Clone, FromRdf)]
+#[derive(Debug, Clone, FromRdf, ToRdf)]
 #[prefix(mcl:"http://nesped1.caf.ufv.br/micelio/ontology#")]
 #[rdftype(mcl:ModelWeightsUpdate)]
 pub struct ModelWeightsUpdate<'a> {
@@ -678,105 +596,52 @@ impl<'a> ModelWeightsUpdate<'a> {
     }
 }
 
-impl<'a> ToRdf for ModelWeightsUpdate<'a> {
-    fn into_rdf_triples<'g>(
-        &'g self,
-        graph: &'g mut Graph,
-        subject: NamedOrBlankNodeRef<'g>,
-    ) -> NamedOrBlankNodeRef<'g> {
-        graph.insert(TripleRef::new(
-            subject,
-            rdf::TYPE,
-            NamedNodeRef::from(Self::rdf_type()),
-        ));
-        graph.insert(TripleRef::new(
-            subject,
-            mcl!("forRound"),
-            &Literal::from(self.for_round),
-        ));
-        graph.insert(TripleRef::new(
-            subject,
-            mcl!("forTask"),
-            NamedNodeRef::from(self.for_task.as_ref()),
-        ));
-        graph.insert(TripleRef::new(
-            subject,
-            mcl!("fromNode"),
-            NamedNodeRef::from(self.from_node),
-        ));
-        graph.insert(TripleRef::new(
-            subject,
-            mcl!("totalSize"),
-            &Literal::from(self.total_size),
-        ));
-        subject
-    }
-}
-
-#[derive(Debug, Clone, FromRdf)]
+#[derive(Debug, Clone, FromRdf, ToRdf)]
+#[prefix(rdf:"http://www.w3.org/1999/02/22-rdf-syntax-ns#")]
 #[prefix(mcl:"http://nesped1.caf.ufv.br/micelio/ontology#")]
 #[rdftype(mcl:ConfusionMatrix)]
 pub struct ConfusionMatrix {
+    #[predicate(mcl:actualCategory)]
+    pub actual_category: Iri<String>,
+    #[predicate(mcl:predictedCategory)]
+    pub predicted_category: Iri<String>,
     #[predicate(mcl:forTask)]
     pub for_task: Iri<String>,
     #[predicate(mcl:forRound)]
     pub for_round: u64,
-    #[predicate(mcl:truePositive)]
-    pub true_positive: u64,
-    #[predicate(mcl:trueNegative)]
-    pub true_negative: u64,
-    #[predicate(mcl:falsePositive)]
-    pub false_positive: u64,
-    #[predicate(mcl:falseNegative)]
-    pub false_negative: u64,
+    #[predicate(rdf:value)]
+    pub count: u64,
 }
 
-impl ToRdf for ConfusionMatrix {
-    fn into_rdf_triples<'g>(
-        &'g self,
-        graph: &'g mut Graph,
-        subject: NamedOrBlankNodeRef<'g>,
-    ) -> NamedOrBlankNodeRef<'g> {
-        graph.insert(TripleRef::new(
-            subject,
-            rdf::TYPE,
-            NamedNodeRef::from(Self::rdf_type()),
-        ));
-        graph.insert(TripleRef::new(
-            subject,
-            mcl!("forRound"),
-            &Literal::from(self.for_round),
-        ));
-        graph.insert(TripleRef::new(
-            subject,
-            mcl!("forTask"),
-            NamedNodeRef::from(self.for_task.as_ref()),
-        ));
-        graph.insert(TripleRef::new(
-            subject,
-            mcl!("truePositive"),
-            &Literal::from(self.true_positive),
-        ));
-        graph.insert(TripleRef::new(
-            subject,
-            mcl!("trueNegative"),
-            &Literal::from(self.true_negative),
-        ));
-        graph.insert(TripleRef::new(
-            subject,
-            mcl!("falsePositive"),
-            &Literal::from(self.false_positive),
-        ));
-        graph.insert(TripleRef::new(
-            subject,
-            mcl!("falseNegative"),
-            &Literal::from(self.false_negative),
-        ));
-        subject
+impl ConfusionMatrix {
+    #[cfg(feature = "tch")]
+    pub fn from_tch_predictions<'a>(
+        task: Iri<String>,
+        round: u64,
+        categories: &'a Vec<Iri<String>>,
+        actual_idx: tch::Tensor,
+        predicted_idx: tch::Tensor,
+    ) -> Result<impl Iterator<Item = Self> + 'a, tch::TchError> {
+        let actual_idx: Vec<i64> = Vec::try_from(actual_idx.to_device(tch::Device::Cpu))?;
+        let predicted_idx: Vec<i64> = Vec::try_from(predicted_idx.to_device(tch::Device::Cpu))?;
+        let predictions = actual_idx.into_iter().zip(predicted_idx.into_iter());
+        let mut count_map: HashMap<_, u64> = HashMap::new();
+        for t in predictions {
+            count_map.entry(t).and_modify(|n| *n += 1).or_insert(1);
+        }
+        Ok(count_map.into_iter().filter_map(move |((actual, pred), n)| {
+            Some(Self {
+                actual_category: categories.get(actual as usize)?.clone(),
+                predicted_category: categories.get(pred as usize)?.clone(),
+                for_task: task.clone(),
+                for_round: round,
+                count: n,
+            })
+        }))
     }
 }
 
-#[derive(Debug, Clone, FromRdf)]
+#[derive(Debug, Clone, FromRdf, ToRdf)]
 #[prefix(mcl:"http://nesped1.caf.ufv.br/micelio/ontology#")]
 #[rdftype(mcl:EntityImage)]
 pub struct EntityImage {
@@ -786,32 +651,7 @@ pub struct EntityImage {
     pub file_path: String,
 }
 
-impl ToRdf for EntityImage {
-    fn into_rdf_triples<'g>(
-        &'g self,
-        graph: &'g mut Graph,
-        subject: NamedOrBlankNodeRef<'g>,
-    ) -> NamedOrBlankNodeRef<'g> {
-        graph.insert(TripleRef::new(
-            subject,
-            rdf::TYPE,
-            NamedNodeRef::from(Self::rdf_type()),
-        ));
-        graph.insert(TripleRef::new(
-            subject,
-            mcl!("represents"),
-            NamedNodeRef::from(self.represents.as_ref()),
-        ));
-        graph.insert(TripleRef::new(
-            subject,
-            mcl!("filePath"),
-            LiteralRef::from(self.file_path.as_str()),
-        ));
-        subject
-    }
-}
-
-#[derive(Debug, Clone, FromRdf)]
+#[derive(Debug, Clone, FromRdf, ToRdf)]
 #[prefix(mcl:"http://nesped1.caf.ufv.br/micelio/ontology#")]
 #[rdftype(mcl:CategorizedImage)]
 pub struct CategorizedImage {
@@ -823,39 +663,18 @@ pub struct CategorizedImage {
     pub predict_prob: Option<f32>,
 }
 
-impl ToRdf for CategorizedImage {
-    fn into_rdf_triples<'g>(
-        &'g self,
-        graph: &'g mut Graph,
-        subject: NamedOrBlankNodeRef<'g>,
-    ) -> NamedOrBlankNodeRef<'g> {
-        graph.insert(TripleRef::new(
-            subject,
-            rdf::TYPE,
-            NamedNodeRef::from(Self::rdf_type()),
-        ));
-        graph.insert(TripleRef::new(
-            subject,
-            mcl!("represents"),
-            NamedNodeRef::from(self.represents.as_ref()),
-        ));
-        graph.insert(TripleRef::new(
-            subject,
-            mcl!("category"),
-            NamedNodeRef::from(self.category.as_ref()),
-        ));
-        if let Some(p) = self.predict_prob {
-            let p = Literal::from(p);
-            graph.insert(TripleRef::new(subject, mcl!("predictProbability"), &p));
-        }
-        subject
-    }
+#[derive(Debug, Clone)]
+pub struct MlModelEntry {
+    pub iri: Iri<String>,
+    pub algorithm_iri: Iri<String>,
+    pub for_task: Iri<String>,
+    pub for_task_layout: FlTaskLayout,
 }
 
 #[derive(Debug, Clone, FromRdf)]
 #[prefix(mcl:"http://nesped1.caf.ufv.br/micelio/ontology#")]
 #[rdftype(mcl:MlModelEntry)]
-pub struct MlModelEntry {
+pub struct RawMlModelEntry {
     #[subject]
     pub iri: Iri<String>,
     #[predicate(mcl:fromAlgorithm)]
@@ -863,10 +682,34 @@ pub struct MlModelEntry {
     #[predicate(mcl:forTask)]
     pub for_task: Iri<String>,
     #[predicate(mcl:forTaskLayout)]
-    pub for_task_layout: FlTaskLayout,
+    pub for_task_layout: RawFlTaskLayout,
 }
 
-impl ToRdf for MlModelEntry {
+impl TryFrom<RawMlModelEntry> for MlModelEntry {
+    type Error = LayoutValidationError;
+    fn try_from(value: RawMlModelEntry) -> Result<Self, Self::Error> {
+        let for_task_layout = value.for_task_layout.try_into()?;
+        Ok(Self {
+            iri: value.iri,
+            algorithm_iri: value.algorithm_iri,
+            for_task: value.for_task,
+            for_task_layout,
+        })
+    }
+}
+
+impl From<MlModelEntry> for RawMlModelEntry {
+    fn from(value: MlModelEntry) -> Self {
+        Self {
+            iri: value.iri,
+            algorithm_iri: value.algorithm_iri,
+            for_task: value.for_task,
+            for_task_layout: value.for_task_layout.into(),
+        }
+    }
+}
+
+impl ToRdf for RawMlModelEntry {
     fn into_rdf_triples<'g>(
         &'g self,
         graph: &'g mut Graph,
@@ -890,6 +733,102 @@ impl ToRdf for MlModelEntry {
         ));
         self.for_task_layout
             .into_rdf_triples(graph, task_layout_subj.into());
+        subject
+    }
+}
+
+pub struct DynamicMlEntry<'g>(pub HashMap<Iri<&'g str>, TermRef<'g>>);
+
+impl<'g> Deref for DynamicMlEntry<'g> {
+    type Target = HashMap<Iri<&'g str>, TermRef<'g>>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<'g> DerefMut for DynamicMlEntry<'g> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<'g> DynamicMlEntry<'g> {
+    pub fn from_rdf_term_requiring(
+        graph: &'g Graph,
+        subject: NamedOrBlankNodeRef<'g>,
+        atts: &Vec<Iri<&'g str>>,
+        defaults: &HashMap<Iri<&'g str>, TermRef<'g>>,
+    ) -> Option<Self> {
+        atts.iter()
+            .map(|att| {
+                let p = NamedNodeRef::from(*att);
+                let o = graph
+                    .object_for_subject_predicate(subject, p)
+                    .or_else(|| defaults.get(att).copied())?;
+                Some((*att, o))
+            })
+            .collect::<Option<HashMap<_, _>>>()
+            .map(Self)
+    }
+
+    pub fn decode_instances_from(
+        graph: &'g Graph,
+        atts: impl IntoIterator<Item = Iri<&'g str>>,
+        defaults: &HashMap<Iri<&'g str>, TermRef<'g>>,
+    ) -> impl Iterator<Item = Self> {
+        let atts: Vec<_> = atts.into_iter().collect();
+        graph
+            .subjects_for_predicate_object(rdf::TYPE, mcl::ML_ENTRY)
+            .filter_map(move |s| Self::from_rdf_term_requiring(graph, s, &atts, defaults))
+    }
+}
+
+impl<'g> ToRdf for DynamicMlEntry<'g> {
+    fn into_rdf_triples<'a>(
+        &'a self,
+        graph: &'a mut Graph,
+        subject: oxrdf::NamedOrBlankNodeRef<'a>,
+    ) -> oxrdf::NamedOrBlankNodeRef<'a> {
+        graph.insert(TripleRef::new(subject, rdf::TYPE, mcl::ML_ENTRY));
+        for (pred, obj) in self.0.iter() {
+            graph.insert(TripleRef::new(subject, *pred, *obj));
+        }
+        subject
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DynamicMlOutput<'g> {
+    pub cls: Iri<&'g str>,
+    pub atts: HashMap<Iri<&'g str>, TermRef<'g>>,
+}
+
+impl<'g> DynamicMlOutput<'g> {
+    pub fn new(cls: Iri<&'g str>, atts: HashMap<Iri<&'g str>, TermRef<'g>>) -> Self {
+        Self { cls, atts }
+    }
+}
+
+impl<'g> RdfTypeRef for DynamicMlOutput<'g> {
+    fn rdf_type_ref<'a>(&'a self) -> Iri<&'a str> {
+        self.cls
+    }
+}
+
+impl<'g> ToRdf for DynamicMlOutput<'g> {
+    fn into_rdf_triples<'a>(
+        &'a self,
+        graph: &'a mut Graph,
+        subject: oxrdf::NamedOrBlankNodeRef<'a>,
+    ) -> oxrdf::NamedOrBlankNodeRef<'a> {
+        graph.insert(TripleRef::new(
+            subject,
+            rdf::TYPE,
+            NamedNodeRef::from(self.cls),
+        ));
+        for (pred, obj) in self.atts.iter() {
+            graph.insert(TripleRef::new(subject, *pred, *obj));
+        }
         subject
     }
 }

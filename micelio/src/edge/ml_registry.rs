@@ -1,13 +1,12 @@
 use crate::{
-    dto::{Config, MlModelEntry},
+    dto::{Config, MlModelEntry, RawMlModelEntry},
     fl::{FlContext, MlAlgorithm, MlCatalog, MlDirectory, MlModel, MlResult, context::CcLayer},
-    kdb::{ContextBuffer, InternalKnowledgeDBExt, KnowledgeDB},
+    kdb::{ContextBuffer, InternalKnowledgeDBExt, LocalKdb, SyncKnowledgeDB},
     vocab::model,
 };
 use futures::lock::Mutex;
-use micelio_rdf::GraphDecode;
+use micelio_rdf::{GraphDecode, Namespaced};
 use oxiri::Iri;
-use oxrdf::Graph;
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
@@ -17,7 +16,7 @@ use std::{
 };
 
 pub(crate) struct MlRegistry {
-    pub(crate) kdb: Arc<dyn KnowledgeDB>,
+    pub(crate) kdb: Arc<LocalKdb>,
     pub(crate) node_iri: Iri<String>,
     pub(crate) cloud_addr: SocketAddr,
     pub(crate) fog_addrs: Arc<StdMutex<HashSet<SocketAddr>>>,
@@ -26,8 +25,8 @@ pub(crate) struct MlRegistry {
 }
 
 impl MlRegistry {
-    pub async fn new(
-        kdb: Arc<dyn KnowledgeDB>,
+    pub(crate) fn new(
+        kdb: Arc<LocalKdb>,
         node_iri: Iri<String>,
         cloud_addr: SocketAddr,
         fog_addrs: Arc<StdMutex<HashSet<SocketAddr>>>,
@@ -116,11 +115,11 @@ WHERE {{
 }}
 "
         );
-        let graph = kdb.construct(&query).await?;
+        let graph = kdb.sync_construct(&query)?;
         let entries = graph
-            .decode_instances::<MlModelEntry>()
-            .filter_map(|r| r.ok())
-            .map(|entry| (entry.for_task_layout.iri.clone(), entry))
+            .decode_instances::<RawMlModelEntry>()
+            .filter_map(|r| r.ok()?.try_into().ok())
+            .map(|entry: MlModelEntry| (entry.for_task_layout.iri.clone(), entry))
             .collect::<HashMap<_, _>>();
         Ok(Self {
             kdb,
@@ -157,8 +156,7 @@ WHERE {{
             };
             let dataset = ml_model_entry
                 .for_task_layout
-                .get_predict_dataset(self.kdb.as_ref())
-                .await?;
+                .get_predict_dataset(self.kdb.as_ref())?;
             let Some(dataset) = dataset else {
                 continue;
             };
@@ -168,7 +166,22 @@ WHERE {{
             else {
                 continue;
             };
-            self.predict(model.as_ref(), dataset).await?;
+            let mut ctx = ContextBuffer {
+                layer: CcLayer::Edge,
+                kdb: self.kdb.clone(),
+                node_iri: self.node_iri.clone(),
+                pub_addrs: self.pub_addrs(),
+                graphs: Default::default(),
+            };
+            nsrs::log!(
+                "[MlRegistry] applying predictions with model {}, dataset with {} triples...",
+                self.kdb
+                    .prefixes()
+                    .unresolve(ml_model_entry.algorithm_iri.as_ref()),
+                dataset.len(),
+            );
+            model.predict(dataset, &mut ctx)?;
+            ctx.finish().await?;
         }
         Ok(())
     }
@@ -185,33 +198,20 @@ WHERE {{
         addrs
     }
 
-    async fn predict(&self, model: &dyn MlModel, dataset: Graph) -> Result<(), Box<dyn Error>> {
-        nsrs::log!("[MlRegistry] applying predictions...");
-        let mut ctx = ContextBuffer {
-            layer: CcLayer::Edge,
-            kdb: self.kdb.clone(),
-            node_iri: self.node_iri.clone(),
-            pub_addrs: self.pub_addrs(),
-            graphs: Default::default(),
-        };
-        model.predict(dataset, &mut ctx).await?;
-        ctx.finish().await?;
-        Ok(())
-    }
-
     pub fn algorithm_iris(&self) -> Vec<Iri<&'static str>> {
         self.ml_catalog.algorithm_iris()
     }
 
-    pub fn start_algorithm(
+    pub(crate) fn start_algorithm(
         &self,
         iri: Iri<&str>,
+        ctx: &mut FlContext,
         params: Config,
     ) -> Option<Result<Box<dyn MlAlgorithm>, Box<dyn Error>>> {
-        self.ml_catalog.start_algorithm(iri, params)
+        self.ml_catalog.start_algorithm(iri, ctx, params)
     }
 
-    pub fn load_model<'a>(
+    pub(crate) fn load_model<'a>(
         &self,
         iri: Iri<&str>,
         dir: MlDirectory<'a>,
@@ -219,11 +219,7 @@ WHERE {{
         self.ml_catalog.load_model(iri, dir)
     }
 
-    pub async fn store_model(
-        &self,
-        ctx: &mut FlContext,
-        (algorithm_iri, model): (Iri<&'static str>, &dyn MlModel),
-    ) -> MlResult<()> {
+    pub(crate) fn store_model(&self, ctx: &mut FlContext, model: &dyn MlModel) -> MlResult<()> {
         let dir = MlDirectory::Final {
             task: ctx.task_iri.as_ref(),
         }
@@ -231,28 +227,33 @@ WHERE {{
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, ""))?;
         std::fs::create_dir_all(&dir)?;
         model.store(&dir)?;
+        let dataset = ctx.task_layout.get_predict_dataset(self.kdb.as_ref())?;
+        if let Some(dataset) = dataset {
+            model.predict(dataset, &mut ctx.ctx_buffer)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn publish_model(
+        &self,
+        ctx: &mut FlContext,
+        algorithm_iri: Iri<&'static str>,
+    ) -> MlResult<()> {
         let ml_model_entry_iri = model::new();
         let ml_model_entry = MlModelEntry {
             iri: ml_model_entry_iri,
             algorithm_iri: algorithm_iri.into(),
             for_task: ctx.task_iri.clone(),
-            for_task_layout: ctx.task_class.clone(),
+            for_task_layout: ctx.task_layout.clone().into(),
         };
+        let raw_entry = RawMlModelEntry::from(ml_model_entry.clone());
         self.kdb
-            .acquire_context(&ml_model_entry, ctx.node_iri.as_ref(), &[])
+            .acquire_context(&raw_entry, ctx.node_iri.as_ref(), &[])
             .await?;
-
-        let dataset = ml_model_entry
-            .for_task_layout
-            .get_predict_dataset(self.kdb.as_ref())
-            .await?;
-        if let Some(dataset) = dataset {
-            model.predict(dataset, &mut ctx.ctx_buffer).await?;
-        }
         self.ml_entries
             .lock()
             .await
-            .insert(ctx.task_class.iri.clone(), ml_model_entry);
+            .insert(ctx.task_layout.iri.clone(), ml_model_entry);
         Ok(())
     }
 }

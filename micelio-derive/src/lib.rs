@@ -1,6 +1,7 @@
 mod from_rdf;
-mod namespaced;
 mod ml_catalog;
+mod namespaced;
+mod to_rdf;
 
 use oxiri::Iri;
 use proc_macro2::Span;
@@ -10,6 +11,14 @@ use syn::parse::{Parse, ParseStream};
 pub fn derive_from_rdf(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let ast: syn::DeriveInput = syn::parse_macro_input!(input);
     from_rdf::expand(&ast)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+#[proc_macro_derive(ToRdf, attributes(prefix, rdftype, subject, predicate, predicates))]
+pub fn derive_to_rdf(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let ast: syn::DeriveInput = syn::parse_macro_input!(input);
+    to_rdf::expand(&ast)
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }

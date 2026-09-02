@@ -139,3 +139,8 @@ mcl:fromExpression a owl:DatatypeProperty, owl:FunctionalProperty;
 mcl:AttributeBinding a owl:Class;
   rdfs:comment "An attribute that is bound to a derivation rule." ;
   .
+
+mcl:contains a owl:ObjectProperty, owl:TransitiveProperty;
+  rdfs:domain tlc:Entity;
+  rdfs:range tlc:Entity;
+  .

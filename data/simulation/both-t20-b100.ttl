@@ -1,0 +1,79 @@
+PREFIX trash: <http://nesped1.caf.ufv.br/micelio/simulation/trash#>
+PREFIX bikes: <http://nesped1.caf.ufv.br/micelio/simulation/bikes#>
+PREFIX sim: <http://nesped1.caf.ufv.br/micelio/simulation#>
+PREFIX mcl: <http://nesped1.caf.ufv.br/micelio/ontology#>
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX qu: <http://purl.oclc.org/NET/ssnx/qu/qu#>
+PREFIX unit: <http://purl.oclc.org/NET/ssnx/qu/unit#>
+PREFIX tlc: <http://gessi.lsi.upc.edu/threelevelcontextmodelling/ThreeLContextOnt/UpperLevelOntology#>
+
+sim:Case2 a sim:TestCase ;
+    sim:cloudLayer [
+        sim:initWith "data/simulation/trash-model.ttl", "data/simulation/bikes-model.ttl";
+        sim:port 4242;
+        sim:linkToFog [
+            sim:dataRate [ rdf:value 1; qu:unit unit:gbps ];
+            sim:delay [ rdf:value 10; qu:unit unit:millisecond ];
+        ];
+        sim:linkToEdge [
+            sim:dataRate [ rdf:value 100; qu:unit unit:mbps ];
+            sim:delay [ rdf:value 100; qu:unit unit:millisecond ];
+        ];
+    ];
+    sim:fogLayer [
+        sim:nodes 20;
+        sim:port 4242;
+        sim:linkToEdge [
+            sim:dataRate [ rdf:value 100; qu:unit unit:mbps ];
+            sim:delay [ rdf:value 5; qu:unit unit:nanosecond ];
+        ];
+    ];
+    sim:edgeLayer [
+        sim:nodesPerAp 15;
+        sim:simulateInitCtxAcquisition true;
+    ];
+    sim:environment [
+        sim:briteSize 5000;
+        sim:briteParams "scratch/micelio/RTWaxman500.conf";
+        sim:origin (-73.9593391418457 40.75984191894531);
+        sim:area (
+            [ rdf:value 19007.08; qu:unit unit:metre ]
+            [ rdf:value 28122.80; qu:unit unit:metre ]
+        );
+    ];
+    sim:learningForBikes [
+        sim:trainAggData "data/archive/bikes-data-s2-train-all.parquet";
+        sim:testAggData "data/archive/bikes-data-s2-test-all.parquet";
+        sim:trainEventData "data/archive/bikes-data-s2-events-train-all.parquet";
+        sim:testEventData "data/archive/bikes-data-s2-events-test-all.parquet";
+        sim:trainWeatherData "data/archive/bikes-data-s2-weather-train-all.parquet";
+        sim:testWeatherData "data/archive/bikes-data-s2-weather-test-all.parquet";
+        sim:stationsData "data/archive/bikes-data-s2-stations.parquet";
+        sim:outputPath "data/archive/bikes-output-s2-t20-b100.parquet";
+        sim:nodes 100;
+        sim:userNodes 5;
+        sim:validationFrac 0.2;
+        sim:learningRate 0.001;
+        sim:task bikes:BikeShareTask;
+        sim:flAlgorithm mcl:DefaultFedAvg;
+        sim:mlAlgorithm mcl:MlpRegressor;
+        sim:numberOfRounds 30;
+        sim:testTimestamp "2025-01-01T00:00:00-04:00"^^xsd:dateTimeStamp;
+    ];
+    sim:learningForTrash [
+        sim:initWith "data/archive/trash-data-all.csv";
+        sim:outputPath "data/archive/trash-output-s2-t20-b100.parquet";
+        sim:nodes 20;
+        sim:userNodes 5;
+        sim:testFrac 0.2;
+        sim:validationFrac 0.2;
+        sim:learningRate 0.001;
+        sim:task trash:TrashCategorization;
+        sim:flAlgorithm mcl:DefaultFedAvg;
+        sim:mlAlgorithm mcl:ResNet18ImageClassifier;
+        sim:numberOfRounds 30;
+    ];
+    .

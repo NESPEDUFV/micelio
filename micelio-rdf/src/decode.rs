@@ -5,8 +5,10 @@ use crate::prefix;
 use oxiri::Iri;
 use oxrdf::vocab::rdf;
 use oxrdf::{
-    Graph, NamedNode, NamedNodeRef, NamedOrBlankNode, NamedOrBlankNodeRef, Term, TermRef, TripleRef,
+    Graph, Literal, LiteralRef, NamedNode, NamedNodeRef, NamedOrBlankNode, NamedOrBlankNodeRef,
+    Term, TermRef, TripleRef,
 };
+use std::collections::HashMap;
 use std::error::Error;
 use std::net::SocketAddr;
 use std::ops::{Deref, DerefMut};
@@ -68,6 +70,18 @@ pub trait RdfType {
     fn rdf_type() -> Iri<&'static str>;
 }
 
+/// Types that are representable by an RDF type/OWL class.
+pub trait RdfTypeRef {
+    /// Returns the IRI that points to the related RDF type.
+    fn rdf_type_ref<'g>(&'g self) -> Iri<&'g str>;
+}
+
+impl<T: RdfType> RdfTypeRef for T {
+    fn rdf_type_ref<'g>(&'g self) -> Iri<&'g str> {
+        Self::rdf_type()
+    }
+}
+
 impl<'g> FromRdf<'g> for String {
     type Err = FromRdfError<'g>;
     fn from_rdf_term(_graph: &'g Graph, term: impl Into<TermRef<'g>>) -> Result<Self, Self::Err> {
@@ -110,20 +124,74 @@ macro_rules! from_rdf_literal {
     };
 }
 
-from_rdf_literal!(u8, BadInteger);
-from_rdf_literal!(u16, BadInteger);
-from_rdf_literal!(u32, BadInteger);
-from_rdf_literal!(u64, BadInteger);
-from_rdf_literal!(u128, BadInteger);
-from_rdf_literal!(usize, BadInteger);
-from_rdf_literal!(i8, BadInteger);
-from_rdf_literal!(i16, BadInteger);
-from_rdf_literal!(i32, BadInteger);
-from_rdf_literal!(i64, BadInteger);
-from_rdf_literal!(i128, BadInteger);
-from_rdf_literal!(isize, BadInteger);
-from_rdf_literal!(f32, BadFloat);
-from_rdf_literal!(f64, BadFloat);
+macro_rules! int_from_rdf_literal {
+    ($T:ty, $Error:ident) => {
+        impl<'g> FromRdf<'g> for $T {
+            type Err = FromRdfError<'g>;
+            fn from_rdf_term(
+                _graph: &'g Graph,
+                term: impl Into<TermRef<'g>>,
+            ) -> Result<Self, Self::Err> {
+                let term = term.into();
+                match term {
+                    TermRef::Literal(literal) => {
+                        let v = literal.value();
+                        if v == "true" {
+                            Ok(1)
+                        } else if v == "false" {
+                            Ok(0)
+                        } else {
+                            v.parse().map_err(FromRdfError::$Error)
+                        }
+                    }
+                    _ => Err(FromRdfError::NotLiteral(term)),
+                }
+            }
+        }
+    };
+}
+
+macro_rules! float_from_rdf_literal {
+    ($T:ty, $Error:ident) => {
+        impl<'g> FromRdf<'g> for $T {
+            type Err = FromRdfError<'g>;
+            fn from_rdf_term(
+                _graph: &'g Graph,
+                term: impl Into<TermRef<'g>>,
+            ) -> Result<Self, Self::Err> {
+                let term = term.into();
+                match term {
+                    TermRef::Literal(literal) => {
+                        let v = literal.value();
+                        if v == "true" {
+                            Ok(1.0)
+                        } else if v == "false" {
+                            Ok(0.0)
+                        } else {
+                            v.parse().map_err(FromRdfError::$Error)
+                        }
+                    }
+                    _ => Err(FromRdfError::NotLiteral(term)),
+                }
+            }
+        }
+    };
+}
+
+int_from_rdf_literal!(u8, BadInteger);
+int_from_rdf_literal!(u16, BadInteger);
+int_from_rdf_literal!(u32, BadInteger);
+int_from_rdf_literal!(u64, BadInteger);
+int_from_rdf_literal!(u128, BadInteger);
+int_from_rdf_literal!(usize, BadInteger);
+int_from_rdf_literal!(i8, BadInteger);
+int_from_rdf_literal!(i16, BadInteger);
+int_from_rdf_literal!(i32, BadInteger);
+int_from_rdf_literal!(i64, BadInteger);
+int_from_rdf_literal!(i128, BadInteger);
+int_from_rdf_literal!(isize, BadInteger);
+float_from_rdf_literal!(f32, BadFloat);
+float_from_rdf_literal!(f64, BadFloat);
 from_rdf_literal!(bool, BadBool);
 from_rdf_literal!(SocketAddr, BadAddr);
 
@@ -421,6 +489,29 @@ impl<'g, T: FromRdf<'g>> FromRdfMulti<'g> for Option<T> {
     }
 }
 
+macro_rules! from_rdf_multi_impl_map {
+    ($S:ty) => {
+        impl<'g, T: FromRdf<'g>> FromRdfMulti<'g> for HashMap<Iri<$S>, T> {
+            type Item = T;
+            fn from_rdf_terms(
+                graph: &'g Graph,
+                terms: impl Iterator<Item = TermRef<'g>>,
+            ) -> Result<Self, <Self::Item as FromRdf<'g>>::Err> {
+                Ok(terms
+                    .filter_map(|term| {
+                        let iri = Iri::from_rdf_term(graph, term).ok()?;
+                        let item = T::from_rdf_term(graph, term).ok()?;
+                        Some((iri, item))
+                    })
+                    .collect())
+            }
+        }
+    };
+}
+
+from_rdf_multi_impl_map!(String);
+from_rdf_multi_impl_map!(&'g str);
+
 macro_rules! from_rdf_multi_impl {
     ($($V:ident)::+; $(+ $P:path)*) => {
         impl<'g, T: FromRdf<'g> $(+ $P)*> FromRdfMulti<'g> for $($V)::*<T> {
@@ -466,6 +557,25 @@ impl<'g> FromRdf<'g> for Term {
     fn from_rdf_term(_graph: &'g Graph, term: impl Into<TermRef<'g>>) -> Result<Self, Self::Err> {
         let term: TermRef = term.into();
         Ok(term.into_owned())
+    }
+}
+
+impl<'g> FromRdf<'g> for LiteralRef<'g> {
+    type Err = FromRdfError<'g>;
+    fn from_rdf_term(_graph: &'g Graph, term: impl Into<TermRef<'g>>) -> Result<Self, Self::Err> {
+        let term = term.into();
+        match term {
+            TermRef::Literal(literal) => Ok(literal),
+            _ => Err(FromRdfError::NotLiteral(term)),
+        }
+    }
+}
+
+impl<'g> FromRdf<'g> for Literal {
+    type Err = FromRdfError<'g>;
+    fn from_rdf_term(graph: &'g Graph, term: impl Into<TermRef<'g>>) -> Result<Self, Self::Err> {
+        let literal = LiteralRef::from_rdf_term(graph, term)?;
+        Ok(literal.into_owned())
     }
 }
 
@@ -529,25 +639,19 @@ impl<'g> FromRdf<'g> for Iri<String> {
 
 impl<'g> FromRdf<'g> for std::path::PathBuf {
     type Err = FromRdfError<'g>;
-    fn from_rdf_term(_graph: &'g Graph, term: impl Into<TermRef<'g>>) -> Result<Self, Self::Err> {
-        let term = term.into();
-        match term {
-            TermRef::Literal(lit) => Ok(lit.value().into()),
-            _ => Err(FromRdfError::NotNamedNode(term)),
-        }
+    fn from_rdf_term(graph: &'g Graph, term: impl Into<TermRef<'g>>) -> Result<Self, Self::Err> {
+        let literal = LiteralRef::from_rdf_term(graph, term)?;
+        Ok(literal.value().into())
     }
 }
 
 impl<'g> FromRdf<'g> for chrono::DateTime<chrono::Utc> {
     type Err = FromRdfError<'g>;
-    fn from_rdf_term(_graph: &'g Graph, term: impl Into<TermRef<'g>>) -> Result<Self, Self::Err> {
-        let term = term.into();
-        match term {
-            TermRef::Literal(literal) => chrono::DateTime::parse_from_rfc3339(literal.value())
-                .map(|t| t.to_utc())
-                .map_err(FromRdfError::BadDateTime),
-            _ => Err(FromRdfError::NotLiteral(term)),
-        }
+    fn from_rdf_term(graph: &'g Graph, term: impl Into<TermRef<'g>>) -> Result<Self, Self::Err> {
+        let literal = LiteralRef::from_rdf_term(graph, term)?;
+        chrono::DateTime::parse_from_rfc3339(literal.value())
+            .map(|t| t.to_utc())
+            .map_err(FromRdfError::BadDateTime)
     }
 }
 
